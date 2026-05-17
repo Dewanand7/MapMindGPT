@@ -1,0 +1,32 @@
+================================================================================
+SEEBURGER BIS - PARTNER MANAGEMENT AND ONBOARDING
+================================================================================
+
+1. PARTNER PROFILE COMPONENTS
+-----------------------------
+To onboard a new EDI partner, four main components must be configured:
+
+A. Communication Profile:
+   - URL/IP Address
+   - Certificates (Public Keys for Encryption/Signing)
+   - AS2 IDs or FTP Credentials
+
+B. Message Profile:
+   - Message Type (e.g., 810 Invoice, DESADV)
+   - Version (e.g., D96A, 4010)
+   - Direction (Inbound/Outbound)
+
+C. Conversion Profile:
+   - Linking the specific BIC Mapping to the message type.
+
+D. Routing Profile:
+   - Defining the destination system (e.g., Production ERP vs. Test ERP).
+
+2. BEST PRACTICES FOR ONBOARDING
+--------------------------------
+1. Certificate Management: Set alerts for expiration (usually 30-60 days prior).
+2. Naming Conventions: Use consistent IDs (e.g., DUNS_PartnerName).
+3. Self-Service: Utilize the Seeburger Community for standard EDI templates.
+4. Testing: Always use a 'Shadow' or 'Quality' environment before moving 
+   partner configurations to Production.
+================================================================================

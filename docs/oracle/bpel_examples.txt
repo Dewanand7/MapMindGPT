@@ -1,0 +1,121 @@
+================================================================================
+ORACLE BPEL PROCESS MANAGER: BUSINESS PROCESS ORCHESTRATION REFERENCE
+================================================================================
+
+1. ENTERPRISE ORCHESTRATION CONCEPTS
+------------------------------------
+BPEL (Business Process Execution Language) acts as the stateful engine of Oracle 
+SOA Suite. It coordinates complex transaction states, multiple system lookups, 
+long-running approvals, and high-integrity process synchronization steps.
+
+2. STRUCTURAL COMPONENT PATTERNS
+--------------------------------
+* `<scope>`: Creates localized containment blocks. Each scope possesses its own variables, 
+  partner links, and dedicated fault-handling routines. Essential for structural granularity.
+* `<flow>`: Instructs the engine to compute activities in parallel branches. It maximizes 
+  compute core resources when querying independent decoupled services.
+* `<pick>`: Blocks the process execution path while waiting for one of several mutually 
+  exclusive messages or a specific expiration alarm deadline to trigger.
+
+3. DETAILED CORE BPEL COMPONENT IMPLEMENTATION
+----------------------------------------------
+Below is a full-scale structure showcasing data transformation assignment, service invocation, 
+as well as standard condition routing workflows.
+
+<?xml version="1.0" encoding="UTF-8"?>
+<process name="OrderFulfillmentOrchestrator"
+         targetNamespace="http://xmlns.oracle.com/EnterpriseApp/OrderOrchestrator"
+         xmlns="http://docs.oasis-open.org/wsbpel/2.0/process/executable"
+         xmlns:bpelx="http://schemas.oracle.com/bpel/extension"
+         xmlns:ns1="http://xmlns.oracle.com/EnterpriseApp/CanonicalOrder"
+         xmlns:ns2="http://xmlns.oracle.com/EnterpriseApp/BackendERPService">
+
+    <!-- ==================================================================== -->
+    <!-- VARIABLES DEFINITION                                                 -->
+    <!-- ==================================================================== -->
+    <variables>
+        <variable name="ReceiveOrder_Input" messageType="ns1:OrderRequestMessage"/>
+        <variable name="InvokeERP_Input" messageType="ns2:ERPRequestMessage"/>
+        <variable name="InvokeERP_Output" messageType="ns2:ERPResponseMessage"/>
+        <variable name="ClientReply_Output" messageType="ns1:OrderResponseMessage"/>
+    </variables>
+
+    <!-- ==================================================================== -->
+    <!-- PROCESS ORCHESTRATION SEQUENCE                                       -->
+    <!-- ==================================================================== -->
+    <sequence name="MainSequence">
+        
+        <!-- Receive initial payload trigger from client -->
+        <receive name="ReceiveInboundOrder" partnerLink="OrderClientLink" 
+                 portType="ns1:OrderPort" operation="processOrder" 
+                 variable="ReceiveOrder_Input" createInstance="yes"/>
+
+        <!-- Scope wrapping Data Transformation and Service Invocation -->
+        <scope name="ERP_Invocation_Scope">
+            <faultHandlers>
+                <catch faultName="ns2:BackendTimeoutFault">
+                    <sequence name="TimeoutHandlerSequence">
+                        <!-- Custom local compensation fallback handling -->
+                        <assign name="FlagTimeoutStatus">
+                            <copy>
+                                <from>string('FAILED_TIMEOUT')</from>
+                                <to>$ClientReply_Output.payload/ns1:Status</to>
+                            </copy>
+                        </assign>
+                    </sequence>
+                </catch>
+            </faultHandlers>
+            
+            <sequence name="ScopeSequence">
+                <!-- Data Assignment block using explicit expressions and mappings -->
+                <assign name="MapCanonicalToERPInput">
+                    <copy>
+                        <from>$ReceiveOrder_Input.payload/ns1:Header/ns1:OrderID</from>
+                        <to>$InvokeERP_Input.payload/ns2:TransactionHeader/ns2:SystemID</to>
+                    </copy>
+                    <copy>
+                        <from>expression("count($ReceiveOrder_Input.payload/ns1:LineItems)")</from>
+                        <to>$InvokeERP_Input.payload/ns2:TransactionBody/ns2:TotalLines</to>
+                    </copy>
+                </assign>
+
+                <!-- Invoke target external business system -->
+                <invoke name="InvokeBackendERP" partnerLink="BackendERPServiceLink" 
+                        portType="ns2:ERPPort" operation="submitInvoice" 
+                        inputVariable="InvokeERP_Input" outputVariable="InvokeERP_Output"/>
+            </sequence>
+        </scope>
+
+        <!-- Conditional Branching Evaluation Loop -->
+        <if name="EvaluateERPResponse">
+            <condition>$InvokeERP_Output.payload/ns2:ResponseStatus = 'ACCEPTED'</condition>
+            <sequence name="SuccessSequence">
+                <assign name="MapSuccessResponse">
+                    <copy>
+                        <from>string('SUCCESS')</from>
+                        <to>$ClientReply_Output.payload/ns1:Status</to>
+                    </copy>
+                </assign>
+            </sequence>
+            <else>
+                <sequence name="FailureSequence">
+                    <assign name="MapFailureResponse">
+                        <copy>
+                            <from>$InvokeERP_Output.payload/ns2:ErrorDetails/ns2:Description</from>
+                            <to>$ClientReply_Output.payload/ns1:StatusReason</to>
+                        </copy>
+                    </assign>
+                    <!-- Throw a functional business fault back up to parent threads -->
+                    <throw name="SignalOrderRejection" faultName="ns1:OrderRejectedFault"/>
+                </sequence>
+            </else>
+        </if>
+
+        <!-- Return structural processing state answer back to initial client -->
+        <reply name="ReplyClientResponse" partnerLink="OrderClientLink" 
+               portType="ns1:OrderPort" operation="processOrder" 
+               variable="ClientReply_Output"/>
+               
+    </sequence>
+</process>
+================================================================================

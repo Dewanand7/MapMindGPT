@@ -1,0 +1,28 @@
+================================================================================
+SEEBURGER BIS (BUSINESS INTEGRATION SUITE) - ARCHITECTURAL OVERVIEW
+================================================================================
+
+1. CORE PLATFORM ARCHITECTURE
+-----------------------------
+Seeburger BIS 6 is a comprehensive integration platform designed to handle 
+High-Volume EDI, MFT, and API-based integrations. It operates on a modular 
+architecture:
+* Front-End: BIS Manager (Java-based UI) or Web-based Portal.
+* Core Engine: Handling workflow execution and message queuing.
+* Database Layer: Stores tracking data, partner profiles, and process logs.
+
+2. MESSAGE PROCESSING FLOW
+--------------------------
+1. Inbound Communication: Adapters (AS2, SFTP, OFTP2) receive the raw file.
+2. Identification: The engine identifies the Sender/Receiver and Message Type.
+3. Pre-Processing: Splits interchange files into individual messages.
+4. Mapping/Conversion: BIS Mapping Engine (BIC) transforms data to/from 
+   canonical formats.
+5. Outbound Communication: Delivers the transformed file to the target system.
+
+3. KEY FEATURES
+---------------
+* Non-Repudiation: Digital signatures and MDN tracking for legal compliance.
+* Scalability: Load balancing via clustered nodes for high-availability.
+* Monitoring: Dashboard for real-time tracking of message statuses and errors.
+================================================================================

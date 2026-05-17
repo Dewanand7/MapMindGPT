@@ -1,0 +1,42 @@
+================================================================================
+XSLT 1.0/2.0 PRACTICAL EXAMPLES & TRANSFORMATION PATTERNS
+================================================================================
+
+1. BASIC TEMPLATE MATCHING
+--------------------------
+The foundation of XSLT is the template match.
+<xsl:template match="/">
+  <html>
+    <body>
+      <xsl:apply-templates select="catalog/item"/>
+    </body>
+  </html>
+</xsl:template>
+
+2. CONDITIONAL LOGIC (IF/CHOOSE)
+--------------------------------
+* Simple If:
+<xsl:if test="price > 100">
+  <span class="expensive">High Priority</span>
+</xsl:if>
+
+* Multiple Conditions (Switch/Case):
+<xsl:choose>
+  <member:when test="status = 'Active'">Green</member:when>
+  <member:when test="status = 'Pending'">Yellow</member:when>
+  <member:otherwise>Red</member:otherwise>
+</xsl:choose>
+
+3. LOOPING (FOR-EACH)
+---------------------
+<xsl:for-each select="order/lineitem">
+  <item_id><xsl:value-of select="id"/></item_id>
+</xsl:for-each>
+
+4. ATTRIBUTE VALUE TEMPLATES (AVT)
+----------------------------------
+To dynamically create attributes:
+<a href="product/{@id}">
+  <xsl:value-of select="name"/>
+</a>
+================================================================================

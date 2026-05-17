@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.venv/
+
+# checkpoints
+checkpoints/
+*.pt
+*.pth
+
+# vector db
+data/vector.index
+data/chunks.pkl
+
+# uploaded docs
+docs/uploads/
+
+# generated tokenizer files
+tokenizer/vocab.json
+tokenizer/merges.txt
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,34 @@
+================================================================================
+XML NAMESPACES (NS) CONCEPT & USAGE
+================================================================================
+
+1. WHY USE NAMESPACES?
+----------------------
+Namespaces prevent "Element Collisions" when combining XML documents from 
+different sources (e.g., a <table> element for HTML vs. a <table> element 
+for furniture).
+
+2. DECLARATION SYNTAX
+---------------------
+The xmlns attribute is used to define a namespace:
+<root xmlns:edi="http://enterprise.com/edi">
+   <edi:order>123</edi:order>
+</root>
+
+* Prefix: 'edi' acts as a shortcut.
+* URI: 'http://enterprise.com/edi' is a unique identifier (not a real URL).
+
+3. DEFAULT NAMESPACES
+---------------------
+If no prefix is used, the namespace applies to the element and all its children:
+<customer xmlns="http://schema.com/customer">
+   <name>John Doe</name> <!-- This is in the schema.com namespace -->
+</customer>
+
+4. NAMESPACES IN XPATH/XSLT
+---------------------------
+When querying namespaced XML, your XSLT engine must define the same URI:
+<xsl:stylesheet xmlns:p="http://schema.com/customer">
+   <xsl:template match="p:customer"> ... </xsl:template>
+</xsl:stylesheet>
+================================================================================

@@ -1,0 +1,98 @@
+================================================================================
+ORACLE SERVICE BUS (OSB) PIPELINE DECOUPLING & ROUTING ARCHITECTURE
+================================================================================
+
+1. ARCHITECTURAL PATTERN: PROXY VS. BUSINESS SERVICES
+-----------------------------------------------------
+* Proxy Service (Inbound Facing):
+  - The virtualized endpoint exposed to the client or consumer applications.
+  - Handles security protocols, transport bindings (REST, SOAP, JMS), and initial validation.
+* Pipeline (Processing Layer):
+  - Contains the message flow logic, routing tables, and data transformation scripts.
+* Business Service (Outbound Facing):
+  - The explicit client configuration pointing directly to the real physical backend provider.
+
+2. PIPELINE STRUCTURE AND SYSTEM CONTEXT VARIABLES
+---------------------------------------------------
+OSB maintains transaction tracking via default context variables:
+* `$header`: Contains SOAP envelope headers or custom HTTP transit headers.
+* `$body`: Contains the explicit message payload wrap.
+* `$attachments`: Container for MIME attachments passed via MTOM/Multipart extensions.
+* `$inbound`: Context parameters details about the sender client.
+* `$outbound`: Context tracking parameters targeted at the downstream backend server.
+
+3. SAMPLE ROUTING PIPELINE SPECIFICATION
+----------------------------------------
+Below is a highly structured representation of an OSB pipeline implementation 
+handling conditional content-based routing and namespace cleanups.
+
+<con:pipelineEntry xmlns:con="http://www.bea.com/wli/sb/pipeline/config" 
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                   xmlns:oper="http://xmlns.oracle.com/sb/stages/config" 
+                   xmlns:trans="http://www.bea.com/wli/sb/stages/transform/config" 
+                   xmlns:route="http://www.bea.com/wli/sb/stages/routing/config">
+    <con:coreEntry>
+        <con:description>Processes Enterprise Orders and Routes to Region Specific ERP Endpoints</con:description>
+    </con:coreEntry>
+    <con:router>
+        <con:pipeline name="_InboundValidationPipeline">
+            <con:page-break-inside>avoid</con:page-break-inside>
+        </con:pipeline>
+        <con:flow>
+            <con:route-node name="RouteToRegionalERP">
+                <con:comment>Evaluates the target geography to direct payload to specific systems</con:comment>
+                <con:actions>
+                    <route:route>
+                        <oper:id>_ActionId_RouteToERP</oper:id>
+                        <!-- Conditional Routing Expression Evaluating Inbound Payload Content -->
+                        <route:service ref="EnterpriseProject/BusinessServices/US_ERP_BS" xsi:type="ref:BusinessServiceRef" xmlns:ref="http://www.bea.com/wli/sb/reference"/>
+                        
+                        <route:outboundTransform>
+                            <!-- Strip incoming security headers before invoking backend -->
+                            <trans:delete varName="header">
+                                <oper:id>_ActionId_StripWSSecurity</oper:id>
+                                <trans:xpathText>./wsse:Security</trans:xpathText>
+                            </trans:delete>
+                            
+                            <!-- Inject API Tracking Keys on the fly -->
+                            <trans:insert varName="outbound">
+                                <oper:id>_ActionId_InjectTrackingToken</oper:id>
+                                <trans:location>
+                                    <oper:xpathText>./ctx:transport/ctx:request/ctx:http-headers</oper:xpathText>
+                                </trans:location>
+                                <trans:where>last-child</trans:where>
+                                <trans:expr>
+                                    <oper:xqueryText><![CDATA[<X-Enterprise-Tracking-ID>{fn:uuid()}</X-Enterprise-Tracking-ID>]]></oper:xqueryText>
+                                </trans:expr>
+                            </trans:insert>
+                        </route:outboundTransform>
+                        
+                        <route:responseTransform>
+                            <!-- Transform Backend Payload back into Enterprise Canonicals -->
+                            <trans:replace varName="body" contents-only="true">
+                                <oper:id>_ActionId_FormatResponse</oper:id>
+                                <trans:location>
+                                    <oper:xpathText>.</oper:xpathText>
+                                </trans:location>
+                                <trans:expr>
+                                    <oper:xsltTransform>
+                                        <oper:resource ref="EnterpriseProject/Transformations/ERPToCanonicalResponse"/>
+                                        <oper:input>$body/*[1]</oper:input>
+                                    </oper:xsltTransform>
+                                </trans:expr>
+                            </trans:replace>
+                        </route:responseTransform>
+                    </route:route>
+                </con:actions>
+            </con:route-node>
+        </con:flow>
+    </con:router>
+</con:pipelineEntry>
+
+4. ARCHITECTURAL BEST PRACTICES
+------------------------------
+1. Keep the OSB layer stateless. Never store long-running execution properties or wait states here.
+2. Leverage Operational Branching to consolidate multi-operation CRUD interfaces under one Proxy.
+3. Always utilize a Service Callout for lightweight authentication checks or database-driven 
+   routing token resolutions.
+================================================================================

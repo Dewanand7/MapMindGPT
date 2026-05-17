@@ -1,0 +1,859 @@
+================================================================================
+ATTENTION MECHANISMS: SCALED DOT-PRODUCT & MULTI-HEAD
+================================================================================
+
+1. CORE CONCEPT
+---------------
+Attention allows the model to focus on specific parts of the input sequence 
+when producing a specific part of the output. It calculates a "relevance score" 
+between tokens.
+
+2. SCALED DOT-PRODUCT ATTENTION
+-------------------------------
+The mechanism uses three primary vectors:
+* Query (Q): What I am looking for.
+* Key (K): What I have to offer.
+* Value (V): The information I provide.
+
+Formula: Attention(Q, K, V) = softmax((QK^T) / sqrt(d_k))V
+
+3. MULTI-HEAD ATTENTION (MHA)
+-----------------------------
+Instead of performing one single attention function, MHA runs multiple 
+"heads" in parallel. Each head learns to attend to different types of 
+information (e.g., one head for grammar, one for coreference, one for intent).
+
+4. TYPES OF ATTENTION
+---------------------
+* Self-Attention: Tokens in a sequence attend to other tokens in the same sequence.
+* Cross-Attention: Decoder tokens attend to Encoder output tokens.
+* Masked Attention: Prevents the model from "looking ahead" at future tokens 
+  during training (common in GPT-style models).
+================================================================================
+
+================================================================================
+TOKENIZATION STRATEGIES IN NLP
+================================================================================
+
+1. WHAT IS TOKENIZATION?
+------------------------
+The process of breaking down a raw string of text into smaller units called 
+"tokens." These tokens are then mapped to numerical IDs that the model 
+can understand.
+
+2. MAJOR METHODS
+----------------
+* Word-level: Splits by whitespace. Problem: Huge vocabulary and "Out of 
+  Vocabulary" (OOV) issues.
+* Character-level: Splits into individual letters. Problem: Very long 
+  sequences and loss of semantic meaning.
+* Subword-level: The modern standard. Breaks rare words into meaningful 
+  pieces (e.g., "unhappiness" -> "un", "happi", "ness").
+
+3. COMMON ALGORITHMS
+--------------------
+* BPE (Byte Pair Encoding): Iteratively merges the most frequent pair of 
+  characters/sequences. Used by GPT models.
+* WordPiece: Similar to BPE but uses a likelihood-based merge. Used by BERT.
+* SentencePiece: Treats whitespace as a character, making it language-agnostic.
+
+4. SPECIAL TOKENS
+-----------------
+- [CLS]: Classification token (start of sequence).
+- [SEP]: Separator token (ends a sentence).
+- [PAD]: Padding to ensure uniform sequence length.
+- [MASK]: Used in masked language modeling.
+================================================================================
+
+================================================================================
+TRANSFORMER ARCHITECTURE: CORE PRINCIPLES & STRUCTURE
+================================================================================
+
+1. OVERVIEW
+-----------
+The Transformer is a deep learning model introduced in "Attention Is All You Need" 
+(2017). Unlike previous RNNs or LSTMs, it processes data in parallel rather than 
+sequentially, drastically reducing training times and improving long-range 
+dependency capture.
+
+2. KEY COMPONENTS
+-----------------
+* Encoder: Processes the input sequence and generates a continuous representation.
+* Decoder: Uses the encoder's representation to generate an output sequence 
+  one element at a time.
+* Positional Encoding: Since there are no recurrences, this adds information 
+  about the relative or absolute position of tokens in the sequence.
+
+3. ARCHITECTURAL FLOW
+---------------------
+Input -> Tokenization -> Positional Encoding -> Multi-Head Attention -> 
+Add & Norm -> Feed Forward -> Add & Norm -> Linear -> Softmax Output.
+
+4. ADVANTAGES
+-------------
+- Parallelization: All tokens are processed simultaneously.
+- Global Context: Every token "sees" every other token regardless of distance.
+================================================================================
+
+ISA*00*          *00*          *ZZ*SENDERID       *ZZ*RECEIVERID     *240517*1500*U*00401*000000003*0*P*>~
+GS*SH*SENDERID*RECEIVERID*20260517*1500*3*X*004010~
+ST*856*0001~
+BSN*00*ASN-554433*20260517*1500~
+HL*1**S~
+TD5**2*FEDX*M~
+REF*BM*999888777~
+HL*2*1*O~
+PRF*PO-12345~
+HL*3*2*I~
+LIN**VC*WIDGET-001~
+SN1**100*EA~
+CTT*3~
+SE*12*0001~
+GE*1*3~
+IEA*1*000000003~
+
+ISA*00*          *00*          *ZZ*SENDERID       *ZZ*RECEIVERID     *240517*1425*U*00401*000000001*0*P*>~
+GS*PO*SENDERID*RECEIVERID*20260517*1425*1*X*004010~
+ST*850*0001~
+BEG*00*SA*PO-12345**20260517~
+CUR*BY*USD~
+ITD*01*3*2**30**31~
+N1*ST*WIDGET CORP*92*98765~
+N3*123 LOGISTICS WAY~
+N4*CHICAGO*IL*60601~
+PO1*1*100*EA*15.50**VC*WIDGET-001*UP*123456789012~
+CTT*1~
+SE*10*0001~
+GE*1*1~
+IEA*1*000000001~
+
+ISA*00*          *00*          *ZZ*SENDERID       *ZZ*RECEIVERID     *240517*1530*U*00401*000000002*0*P*>~
+GS*IN*SENDERID*RECEIVERID*20260517*1530*2*X*004010~
+ST*810*0001~
+BIG*20260517*INV-998877*20260517*PO-12345~~
+N1*RE*WIDGET SUPPLIER*92*112233~
+IT1*1*100*EA*15.50**VC*WIDGET-001~
+TDS*155000~
+ITD*01*3*2**30**31~
+CTT*1~
+SE*8*0001~
+GE*1*2~
+IEA*1*000000002~
+
+ISA*00*          *00*          *ZZ*RECEIVERID     *ZZ*SENDERID       *240517*1430*U*00401*000000004*0*P*>~
+GS*FA*RECEIVERID*SENDERID*20260517*1430*4*X*004010~
+ST*997*0001~
+AK1*PO*1~
+AK2*850*0001~
+AK5*A~
+AK9*A*1*1*1~
+SE*6*0001~
+GE*1*4~
+IEA*1*000000004~
+
+---------------------------------------------------------
+AS2 CONNECTION CONFIGURATION PROFILE
+---------------------------------------------------------
+
+PARTNER NAME:      Global Widgets Inc.
+ENVIRONMENT:       Production / Staging
+
+AS2 IDENTIFIER:    WIDGET_CORP_AS2
+ENDPOINT URL:      https://as2.widgetcorp.com:443/pyX12
+
+ENCRYPTION:        AES-256 (Preferred)
+SIGNING ALGORITHM: SHA-256
+MDN TYPE:          Asynchronous (Requested via HTTPS)
+
+PUBLIC CERTIFICATE: [Attach public_cert.cer here]
+IP ALLOWLIST:      192.168.1.10, 10.0.0.5
+
+NOTES:
+- All outbound files must be signed and encrypted.
+- MDN signatures are required for non-repudiation.
+- Port 443 must be open for inbound traffic from our IP range.
+---------------------------------------------------------
+
+================================================================================
+ORACLE BPEL PROCESS MANAGER: BUSINESS PROCESS ORCHESTRATION REFERENCE
+================================================================================
+
+1. ENTERPRISE ORCHESTRATION CONCEPTS
+------------------------------------
+BPEL (Business Process Execution Language) acts as the stateful engine of Oracle 
+SOA Suite. It coordinates complex transaction states, multiple system lookups, 
+long-running approvals, and high-integrity process synchronization steps.
+
+2. STRUCTURAL COMPONENT PATTERNS
+--------------------------------
+* `<scope>`: Creates localized containment blocks. Each scope possesses its own variables, 
+  partner links, and dedicated fault-handling routines. Essential for structural granularity.
+* `<flow>`: Instructs the engine to compute activities in parallel branches. It maximizes 
+  compute core resources when querying independent decoupled services.
+* `<pick>`: Blocks the process execution path while waiting for one of several mutually 
+  exclusive messages or a specific expiration alarm deadline to trigger.
+
+3. DETAILED CORE BPEL COMPONENT IMPLEMENTATION
+----------------------------------------------
+Below is a full-scale structure showcasing data transformation assignment, service invocation, 
+as well as standard condition routing workflows.
+
+<?xml version="1.0" encoding="UTF-8"?>
+<process name="OrderFulfillmentOrchestrator"
+         targetNamespace="http://xmlns.oracle.com/EnterpriseApp/OrderOrchestrator"
+         xmlns="http://docs.oasis-open.org/wsbpel/2.0/process/executable"
+         xmlns:bpelx="http://schemas.oracle.com/bpel/extension"
+         xmlns:ns1="http://xmlns.oracle.com/EnterpriseApp/CanonicalOrder"
+         xmlns:ns2="http://xmlns.oracle.com/EnterpriseApp/BackendERPService">
+
+    <!-- ==================================================================== -->
+    <!-- VARIABLES DEFINITION                                                 -->
+    <!-- ==================================================================== -->
+    <variables>
+        <variable name="ReceiveOrder_Input" messageType="ns1:OrderRequestMessage"/>
+        <variable name="InvokeERP_Input" messageType="ns2:ERPRequestMessage"/>
+        <variable name="InvokeERP_Output" messageType="ns2:ERPResponseMessage"/>
+        <variable name="ClientReply_Output" messageType="ns1:OrderResponseMessage"/>
+    </variables>
+
+    <!-- ==================================================================== -->
+    <!-- PROCESS ORCHESTRATION SEQUENCE                                       -->
+    <!-- ==================================================================== -->
+    <sequence name="MainSequence">
+        
+        <!-- Receive initial payload trigger from client -->
+        <receive name="ReceiveInboundOrder" partnerLink="OrderClientLink" 
+                 portType="ns1:OrderPort" operation="processOrder" 
+                 variable="ReceiveOrder_Input" createInstance="yes"/>
+
+        <!-- Scope wrapping Data Transformation and Service Invocation -->
+        <scope name="ERP_Invocation_Scope">
+            <faultHandlers>
+                <catch faultName="ns2:BackendTimeoutFault">
+                    <sequence name="TimeoutHandlerSequence">
+                        <!-- Custom local compensation fallback handling -->
+                        <assign name="FlagTimeoutStatus">
+                            <copy>
+                                <from>string('FAILED_TIMEOUT')</from>
+                                <to>$ClientReply_Output.payload/ns1:Status</to>
+                            </copy>
+                        </assign>
+                    </sequence>
+                </catch>
+            </faultHandlers>
+            
+            <sequence name="ScopeSequence">
+                <!-- Data Assignment block using explicit expressions and mappings -->
+                <assign name="MapCanonicalToERPInput">
+                    <copy>
+                        <from>$ReceiveOrder_Input.payload/ns1:Header/ns1:OrderID</from>
+                        <to>$InvokeERP_Input.payload/ns2:TransactionHeader/ns2:SystemID</to>
+                    </copy>
+                    <copy>
+                        <from>expression("count($ReceiveOrder_Input.payload/ns1:LineItems)")</from>
+                        <to>$InvokeERP_Input.payload/ns2:TransactionBody/ns2:TotalLines</to>
+                    </copy>
+                </assign>
+
+                <!-- Invoke target external business system -->
+                <invoke name="InvokeBackendERP" partnerLink="BackendERPServiceLink" 
+                        portType="ns2:ERPPort" operation="submitInvoice" 
+                        inputVariable="InvokeERP_Input" outputVariable="InvokeERP_Output"/>
+            </sequence>
+        </scope>
+
+        <!-- Conditional Branching Evaluation Loop -->
+        <if name="EvaluateERPResponse">
+            <condition>$InvokeERP_Output.payload/ns2:ResponseStatus = 'ACCEPTED'</condition>
+            <sequence name="SuccessSequence">
+                <assign name="MapSuccessResponse">
+                    <copy>
+                        <from>string('SUCCESS')</from>
+                        <to>$ClientReply_Output.payload/ns1:Status</to>
+                    </copy>
+                </assign>
+            </sequence>
+            <else>
+                <sequence name="FailureSequence">
+                    <assign name="MapFailureResponse">
+                        <copy>
+                            <from>$InvokeERP_Output.payload/ns2:ErrorDetails/ns2:Description</from>
+                            <to>$ClientReply_Output.payload/ns1:StatusReason</to>
+                        </copy>
+                    </assign>
+                    <!-- Throw a functional business fault back up to parent threads -->
+                    <throw name="SignalOrderRejection" faultName="ns1:OrderRejectedFault"/>
+                </sequence>
+            </else>
+        </if>
+
+        <!-- Return structural processing state answer back to initial client -->
+        <reply name="ReplyClientResponse" partnerLink="OrderClientLink" 
+               portType="ns1:OrderPort" operation="processOrder" 
+               variable="ClientReply_Output"/>
+               
+    </sequence>
+</process>
+================================================================================
+
+================================================================================
+ORACLE INTEGRATION CLOUD (OIC) ARCHITECTURE & BEST PRACTICES ARCHIVE
+================================================================================
+
+1. INTEGRATION DESIGN PATTERNS
+------------------------------
+* App-Driven Orchestration:
+  - Real-time synchronous (Request-Response) or asynchronous interaction patterns.
+  - Best used when immediate system handshake verification is required by SaaS wrappers.
+
+* Scheduled Orchestration:
+  - Batch execution paradigm driven by Cron-like schedules or explicitly triggered.
+  - Used for daily syncs, data lakes extractions, and multi-file processing runs.
+
+* Publish / Subscribe (Pub-Sub):
+  - Leverages the internal OIC Message Broker. One integration publishes an event 
+    (e.g., "New Customer Created"), and multiple independent integrations subscribe to it.
+
+2. HYBRID ARCHITECTURE & THE CONNECTIVITY AGENT
+----------------------------------------------
+* Ground-to-Cloud Bridging:
+  - The OIC Connectivity Agent must be installed on-premise within the secure network zone.
+  - It establishes an outbound-only HTTPS polling connection (port 443) back to OIC.
+  - Eliminates the need to open incoming firewall ports on-premise.
+* Agent High Availability (HA):
+  - Always deploy Agents in an Agent Group consisting of at least two nodes across 
+    separate physical VM environments to prevent single points of failure.
+
+3. MEMORY MANAGEMENT & LARGE FILE HEURISTICS
+---------------------------------------------
+* Payload Thresholds:
+  - Maximum standard payload processing limit for inline JSON/XML is 10MB.
+  - Payloads exceeding 10MB will trigger Out Of Memory (OOM) aborts or gateway drops.
+* The "Stage File" Pattern:
+  - To process large CSV or text files up to 50MB, download the file locally to the 
+    OIC virtual environment using an FTP/Stage action.
+  - Use the "Read File in Chunks" operation within a "ForEach" loop.
+  - This keeps only a tiny sub-segment of data rows in JVM memory at any single instant.
+
+4. EXCEPTION HANDLING STRUCTURE
+-------------------------------
+* Scope Level Fault Handlers:
+  - Localized block wrappers analogous to Java `try {} catch () {}`.
+  - Used to gracefully handle specific step failures (e.g., API authentication expires, 
+    triggering a token renewal step inside the fault branch).
+* Global Fault Handler:
+  - The ultimate fallback routine for the entire integration instance flow.
+  - Must include steps to format an enterprise alert email, log tracking identifiers, 
+    and systematically call notification webhooks.
+
+5. PERFORMANCE TUNING CHECKLIST
+-------------------------------
+1. Turn off high-level payload tracking in production environments. Set tracing to 
+   "Audit Only" or "None" unless actively troubleshooting bugs.
+2. Minimize nested ForEach loops. Opt for specialized XSLT multi-level looping expressions.
+3. Cache static lookups using OIC Lookups tables rather than executing live SQL queries 
+   against backends during every single transaction.
+================================================================================
+
+================================================================================
+ORACLE SERVICE BUS (OSB) PIPELINE DECOUPLING & ROUTING ARCHITECTURE
+================================================================================
+
+1. ARCHITECTURAL PATTERN: PROXY VS. BUSINESS SERVICES
+-----------------------------------------------------
+* Proxy Service (Inbound Facing):
+  - The virtualized endpoint exposed to the client or consumer applications.
+  - Handles security protocols, transport bindings (REST, SOAP, JMS), and initial validation.
+* Pipeline (Processing Layer):
+  - Contains the message flow logic, routing tables, and data transformation scripts.
+* Business Service (Outbound Facing):
+  - The explicit client configuration pointing directly to the real physical backend provider.
+
+2. PIPELINE STRUCTURE AND SYSTEM CONTEXT VARIABLES
+---------------------------------------------------
+OSB maintains transaction tracking via default context variables:
+* `$header`: Contains SOAP envelope headers or custom HTTP transit headers.
+* `$body`: Contains the explicit message payload wrap.
+* `$attachments`: Container for MIME attachments passed via MTOM/Multipart extensions.
+* `$inbound`: Context parameters details about the sender client.
+* `$outbound`: Context tracking parameters targeted at the downstream backend server.
+
+3. SAMPLE ROUTING PIPELINE SPECIFICATION
+----------------------------------------
+Below is a highly structured representation of an OSB pipeline implementation 
+handling conditional content-based routing and namespace cleanups.
+
+<con:pipelineEntry xmlns:con="http://www.bea.com/wli/sb/pipeline/config" 
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                   xmlns:oper="http://xmlns.oracle.com/sb/stages/config" 
+                   xmlns:trans="http://www.bea.com/wli/sb/stages/transform/config" 
+                   xmlns:route="http://www.bea.com/wli/sb/stages/routing/config">
+    <con:coreEntry>
+        <con:description>Processes Enterprise Orders and Routes to Region Specific ERP Endpoints</con:description>
+    </con:coreEntry>
+    <con:router>
+        <con:pipeline name="_InboundValidationPipeline">
+            <con:page-break-inside>avoid</con:page-break-inside>
+        </con:pipeline>
+        <con:flow>
+            <con:route-node name="RouteToRegionalERP">
+                <con:comment>Evaluates the target geography to direct payload to specific systems</con:comment>
+                <con:actions>
+                    <route:route>
+                        <oper:id>_ActionId_RouteToERP</oper:id>
+                        <!-- Conditional Routing Expression Evaluating Inbound Payload Content -->
+                        <route:service ref="EnterpriseProject/BusinessServices/US_ERP_BS" xsi:type="ref:BusinessServiceRef" xmlns:ref="http://www.bea.com/wli/sb/reference"/>
+                        
+                        <route:outboundTransform>
+                            <!-- Strip incoming security headers before invoking backend -->
+                            <trans:delete varName="header">
+                                <oper:id>_ActionId_StripWSSecurity</oper:id>
+                                <trans:xpathText>./wsse:Security</trans:xpathText>
+                            </trans:delete>
+                            
+                            <!-- Inject API Tracking Keys on the fly -->
+                            <trans:insert varName="outbound">
+                                <oper:id>_ActionId_InjectTrackingToken</oper:id>
+                                <trans:location>
+                                    <oper:xpathText>./ctx:transport/ctx:request/ctx:http-headers</oper:xpathText>
+                                </trans:location>
+                                <trans:where>last-child</trans:where>
+                                <trans:expr>
+                                    <oper:xqueryText><![CDATA[<X-Enterprise-Tracking-ID>{fn:uuid()}</X-Enterprise-Tracking-ID>]]></oper:xqueryText>
+                                </trans:expr>
+                            </trans:insert>
+                        </route:outboundTransform>
+                        
+                        <route:responseTransform>
+                            <!-- Transform Backend Payload back into Enterprise Canonicals -->
+                            <trans:replace varName="body" contents-only="true">
+                                <oper:id>_ActionId_FormatResponse</oper:id>
+                                <trans:location>
+                                    <oper:xpathText>.</oper:xpathText>
+                                </trans:location>
+                                <trans:expr>
+                                    <oper:xsltTransform>
+                                        <oper:resource ref="EnterpriseProject/Transformations/ERPToCanonicalResponse"/>
+                                        <oper:input>$body/*[1]</oper:input>
+                                    </oper:xsltTransform>
+                                </trans:expr>
+                            </trans:replace>
+                        </route:responseTransform>
+                    </route:route>
+                </con:actions>
+            </con:route-node>
+        </con:flow>
+    </con:router>
+</con:pipelineEntry>
+
+4. ARCHITECTURAL BEST PRACTICES
+------------------------------
+1. Keep the OSB layer stateless. Never store long-running execution properties or wait states here.
+2. Leverage Operational Branching to consolidate multi-operation CRUD interfaces under one Proxy.
+3. Always utilize a Service Callout for lightweight authentication checks or database-driven 
+   routing token resolutions.
+================================================================================
+
+================================================================================
+ORACLE SOA SUITE: ADVANCED FAULT HANDLING FRAMEWORK & REFERENCE GUIDE
+================================================================================
+
+1. THE ARCHITECTURE OF FAULT HANDLING
+-------------------------------------
+Oracle SOA Suite separates fault handling into two distinct layer types:
+A. Infrastructure / System Faults: Handled by the Fault Handling Framework
+   via policies (`fault-policies.xml` and `fault-bindings.xml`).
+B. Business Faults: Handled directly within the BPEL orchestration using 
+   `<catch>` and `<catchAll>` blocks.
+
+2. RUNTIME FAULTS VS. BUSINESS FAULTS
+-------------------------------------
+* Runtime/System Faults:
+  - `bpelx:remoteFault`: Communication failure between the SOA composite and the 
+    target service (e.g., HTTP 404, 503, connection timeout).
+  - `bpelx:bindingFault`: Data mismatch or contract violation. Occurs when the 
+    outbound XML fails schema validation against the target WSDL.
+  - `bpelx:subLanguageExecutionFault`: Errors inside expression evaluations, 
+    such as XPath errors or data type mismatches during string manipulation.
+
+* Business Faults:
+  - Explicitly defined in the service WSDL.
+  - Represents a known functional application exception (e.g., `InsufficientFunds`, 
+    `ItemOutOfStock`, `InvalidAccountStatus`).
+
+3. SAMPLE FAULT POLICY CONFIGURATION (`fault-policies.xml`)
+-----------------------------------------------------------
+<?xml version="1.0" encoding="UTF-8"?>
+<faultPolicies xmlns="http://schemas.oracle.com/bpel/faultpolicy">
+    
+    <faultPolicy id="EnterpriseStandardPolicy">
+        <Conditions>
+            <!-- Catch Remote Faults for Auto-Retry -->
+            <FaultName name="bpelx:remoteFault">
+                <Action id="ora-retry-backoff"/>
+            </FaultName>
+            
+            <!-- Catch Binding Faults for Immediate Human Intervention -->
+            <FaultName name="bpelx:bindingFault">
+                <Action id="ora-human-intervention"/>
+            </FaultName>
+        </Conditions>
+        
+        <Actions>
+            <!-- Exponential Backoff Retry Strategy -->
+            <Action id="ora-retry-backoff">
+                <retry>
+                    <retryCount>3</retryCount>
+                    <retryInterval>10</retryInterval>
+                    <exponentialBackoff/>
+                </retry>
+            </Action>
+            
+            <!-- Move instance to the SOA Hospital for manual recovery -->
+            <Action id="ora-human-intervention">
+                <humanIntervention/>
+            </Action>
+            
+            <!-- Terminate the process cleanly -->
+            <Action id="ora-terminate">
+                <abort/>
+            </Action>
+        </Actions>
+    </faultPolicy>
+</faultPolicies>
+
+4. COMPOSITE BINDING RULES (`fault-bindings.xml`)
+-------------------------------------------------
+<?xml version="1.0" encoding="UTF-8"?>
+<faultRules xmlns="http://schemas.oracle.com/bpel/faultpolicy">
+    <!-- Apply the standard policy to all components within the composite -->
+    <composite faultPolicy="EnterpriseStandardPolicy"/>
+</faultRules>
+
+5. SYSTEM RESOLUTION STEPS & BEST PRACTICES
+-------------------------------------------
+1. Always implement exponential backoff for external REST/SOAP endpoints to 
+   prevent overwhelming downstream systems during recovery windows.
+2. Ensure `ora-human-intervention` is applied only to non-idempotent service calls 
+   where automatic retries might cause duplicate transactions.
+3. Use the SOA Enterprise Manager (EM) Console to search the "Error Hospital" 
+   to replay failed instances once backend targets resume normal operations.
+================================================================================
+
+================================================================================
+SEEBURGER BIS (BUSINESS INTEGRATION SUITE) - ARCHITECTURAL OVERVIEW
+================================================================================
+
+1. CORE PLATFORM ARCHITECTURE
+-----------------------------
+Seeburger BIS 6 is a comprehensive integration platform designed to handle 
+High-Volume EDI, MFT, and API-based integrations. It operates on a modular 
+architecture:
+* Front-End: BIS Manager (Java-based UI) or Web-based Portal.
+* Core Engine: Handling workflow execution and message queuing.
+* Database Layer: Stores tracking data, partner profiles, and process logs.
+
+2. MESSAGE PROCESSING FLOW
+--------------------------
+1. Inbound Communication: Adapters (AS2, SFTP, OFTP2) receive the raw file.
+2. Identification: The engine identifies the Sender/Receiver and Message Type.
+3. Pre-Processing: Splits interchange files into individual messages.
+4. Mapping/Conversion: BIS Mapping Engine (BIC) transforms data to/from 
+   canonical formats.
+5. Outbound Communication: Delivers the transformed file to the target system.
+
+3. KEY FEATURES
+---------------
+* Non-Repudiation: Digital signatures and MDN tracking for legal compliance.
+* Scalability: Load balancing via clustered nodes for high-availability.
+* Monitoring: Dashboard for real-time tracking of message statuses and errors.
+================================================================================
+
+================================================================================
+SEEBURGER BIC (BUSINESS INTEGRATION CONVERTER) - MAPPING DESIGNER
+================================================================================
+
+1. THE BIC MAPPING PHILOSOPHY
+-----------------------------
+BIC uses a graphical designer to create mappings (.mme files) that are compiled 
+into executable Java code. It supports any-to-any conversions (EDI to XML, 
+Flat-file to JSON, etc.).
+
+2. CORE FUNCTIONS AND LOGIC
+---------------------------
+* Cross-Referencing: Using 'Table Lookups' to map internal codes to partner codes.
+* Variables: Global and Local variables for counter management and state tracking.
+* Functions:
+  - `date_format()`: Standardizing date strings (e.g., YYYYMMDD to DD.MM.YYYY).
+  - `trim()`: Removing white spaces from fixed-length files.
+  - `if_then_else()`: Complex conditional logic for segment population.
+
+3. MAPPING STRUCTURE
+--------------------
+* Source Side: The input structure definition (e.g., X12 850 Schema).
+* Target Side: The output structure definition (e.g., IDOC or Canonical XML).
+* Mapping Rules: The visual links and functional blocks connecting the two.
+
+4. DEPLOYMENT
+-------------
+Mappings must be "Compiled" and uploaded to the BIS Repository. Once deployed, 
+they are referenced in the "Process Logic" to be used during runtime.
+================================================================================
+
+================================================================================
+SEEBURGER BIS - PARTNER MANAGEMENT AND ONBOARDING
+================================================================================
+
+1. PARTNER PROFILE COMPONENTS
+-----------------------------
+To onboard a new EDI partner, four main components must be configured:
+
+A. Communication Profile:
+   - URL/IP Address
+   - Certificates (Public Keys for Encryption/Signing)
+   - AS2 IDs or FTP Credentials
+
+B. Message Profile:
+   - Message Type (e.g., 810 Invoice, DESADV)
+   - Version (e.g., D96A, 4010)
+   - Direction (Inbound/Outbound)
+
+C. Conversion Profile:
+   - Linking the specific BIC Mapping to the message type.
+
+D. Routing Profile:
+   - Defining the destination system (e.g., Production ERP vs. Test ERP).
+
+2. BEST PRACTICES FOR ONBOARDING
+--------------------------------
+1. Certificate Management: Set alerts for expiration (usually 30-60 days prior).
+2. Naming Conventions: Use consistent IDs (e.g., DUNS_PartnerName).
+3. Self-Service: Utilize the Seeburger Community for standard EDI templates.
+4. Testing: Always use a 'Shadow' or 'Quality' environment before moving 
+   partner configurations to Production.
+================================================================================
+
+================================================================================
+SEEBURGER BIS - ROUTING AND WORKFLOW EXAMPLES
+================================================================================
+
+1. CONTENT-BASED ROUTING (CBR)
+------------------------------
+Routing is determined by the values inside the message.
+Example: 
+IF (Message.SenderID == 'WIDGET_CORP' AND Message.TotalAmount > 10000)
+THEN Route to 'Approval_Workflow'
+ELSE Route to 'Standard_ERP_Queue'
+
+2. PROTOCOL-BASED ROUTING
+-------------------------
+Messages are routed based on how they arrived:
+* AS2 Inbound -> Decrypt -> Map to ERP -> Send to SAP.
+* SFTP Inbound -> Virus Scan -> Archive -> Move to File Share.
+
+3. WORKFLOW (PROCESS) EXAMPLE: AS2 INBOUND
+------------------------------------------
+Step 1: Receive Message (Adapter: AS2_Receiver)
+Step 2: Log MDN Status (Acknowledgment)
+Step 3: Identification (Identify Partner by AS2-From header)
+Step 4: Mapping (Execute BIC Mapping: X12_to_IDOC)
+Step 5: Delivery (Adapter: SAP_ALE_Outbound)
+Step 6: Completion (Archive Original and Resulting Files)
+================================================================================
+
+================================================================================
+XSD (XML SCHEMA DEFINITION) QUICK REFERENCE
+================================================================================
+
+1. BASIC DATA TYPES
+-------------------
+xs:string   : Character strings
+xs:decimal  : Decimal numbers
+xs:integer  : Whole numbers
+xs:boolean  : true/false
+xs:date     : YYYY-MM-DD
+xs:dateTime : YYYY-MM-DDThh:mm:ss
+
+2. ELEMENT DEFINITIONS
+----------------------
+* Simple Element:
+<xs:element name="order_id" type="xs:string"/>
+
+* Complex Element (with children):
+<xs:element name="address">
+  <xs:complexType>
+    <xs:sequence>
+      <xs:element name="street" type="xs:string"/>
+      <xs:element name="city" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+
+3. OCCURRENCE CONSTRAINTS
+-------------------------
+minOccurs="0" : Optional element
+maxOccurs="1" : Default (only one allowed)
+maxOccurs="unbounded" : Unlimited repetitions (for lists/arrays)
+
+4. ENUMERATIONS (RESTRICTIONS)
+------------------------------
+<xs:simpleType name="StatusType">
+  <xs:restriction base="xs:string">
+    <xs:enumeration value="PENDING"/>
+    <xs:enumeration value="SHIPPED"/>
+    <xs:enumeration value="CANCELLED"/>
+  </xs:restriction>
+</xs:simpleType>
+================================================================================
+
+================================================================================
+XML NAMESPACES (NS) CONCEPT & USAGE
+================================================================================
+
+1. WHY USE NAMESPACES?
+----------------------
+Namespaces prevent "Element Collisions" when combining XML documents from 
+different sources (e.g., a <table> element for HTML vs. a <table> element 
+for furniture).
+
+2. DECLARATION SYNTAX
+---------------------
+The xmlns attribute is used to define a namespace:
+<root xmlns:edi="http://enterprise.com/edi">
+   <edi:order>123</edi:order>
+</root>
+
+* Prefix: 'edi' acts as a shortcut.
+* URI: 'http://enterprise.com/edi' is a unique identifier (not a real URL).
+
+3. DEFAULT NAMESPACES
+---------------------
+If no prefix is used, the namespace applies to the element and all its children:
+<customer xmlns="http://schema.com/customer">
+   <name>John Doe</name> <!-- This is in the schema.com namespace -->
+</customer>
+
+4. NAMESPACES IN XPATH/XSLT
+---------------------------
+When querying namespaced XML, your XSLT engine must define the same URI:
+<xsl:stylesheet xmlns:p="http://schema.com/customer">
+   <xsl:template match="p:customer"> ... </xsl:template>
+</xsl:stylesheet>
+================================================================================
+
+================================================================================
+XPATH 1.0/2.0 NAVIGATION CHEATSHEET
+================================================================================
+
+1. PATH SELECTION
+-----------------
+/nodename    : Selects from the root node
+//nodename   : Selects nodes in the document from the current node that match 
+               selection no matter where they are
+.            : Selects the current node
+..           : Selects the parent of the current node
+@            : Selects attributes
+
+2. PREDICATES (FILTERING)
+-------------------------
+/bookstore/book[1]          : Selects the first book element
+/bookstore/book[last()]     : Selects the last book element
+//title[@lang='en']         : Selects titles with 'lang' attribute set to 'en'
+//book[price > 35.00]       : Selects books with a price greater than 35
+
+3. USEFUL FUNCTIONS
+-------------------
+contains(str, sub)  : Returns true if string contains substring
+starts-with(s1, s2) : Returns true if s1 starts with s2
+normalize-space()   : Strips leading/trailing whitespace
+count(node-set)     : Returns number of nodes in set
+concat(s1, s2, ...) : Joins multiple strings
+================================================================================
+
+================================================================================
+XSD (XML SCHEMA DEFINITION) QUICK REFERENCE
+================================================================================
+
+1. BASIC DATA TYPES
+-------------------
+xs:string   : Character strings
+xs:decimal  : Decimal numbers
+xs:integer  : Whole numbers
+xs:boolean  : true/false
+xs:date     : YYYY-MM-DD
+xs:dateTime : YYYY-MM-DDThh:mm:ss
+
+2. ELEMENT DEFINITIONS
+----------------------
+* Simple Element:
+<xs:element name="order_id" type="xs:string"/>
+
+* Complex Element (with children):
+<xs:element name="address">
+  <xs:complexType>
+    <xs:sequence>
+      <xs:element name="street" type="xs:string"/>
+      <xs:element name="city" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+
+3. OCCURRENCE CONSTRAINTS
+-------------------------
+minOccurs="0" : Optional element
+maxOccurs="1" : Default (only one allowed)
+maxOccurs="unbounded" : Unlimited repetitions (for lists/arrays)
+
+4. ENUMERATIONS (RESTRICTIONS)
+------------------------------
+<xs:simpleType name="StatusType">
+  <xs:restriction base="xs:string">
+    <xs:enumeration value="PENDING"/>
+    <xs:enumeration value="SHIPPED"/>
+    <xs:enumeration value="CANCELLED"/>
+  </xs:restriction>
+</xs:simpleType>
+================================================================================
+
+================================================================================
+XSLT 1.0/2.0 PRACTICAL EXAMPLES & TRANSFORMATION PATTERNS
+================================================================================
+
+1. BASIC TEMPLATE MATCHING
+--------------------------
+The foundation of XSLT is the template match.
+<xsl:template match="/">
+  <html>
+    <body>
+      <xsl:apply-templates select="catalog/item"/>
+    </body>
+  </html>
+</xsl:template>
+
+2. CONDITIONAL LOGIC (IF/CHOOSE)
+--------------------------------
+* Simple If:
+<xsl:if test="price > 100">
+  <span class="expensive">High Priority</span>
+</xsl:if>
+
+* Multiple Conditions (Switch/Case):
+<xsl:choose>
+  <member:when test="status = 'Active'">Green</member:when>
+  <member:when test="status = 'Pending'">Yellow</member:when>
+  <member:otherwise>Red</member:otherwise>
+</xsl:choose>
+
+3. LOOPING (FOR-EACH)
+---------------------
+<xsl:for-each select="order/lineitem">
+  <item_id><xsl:value-of select="id"/></item_id>
+</xsl:for-each>
+
+4. ATTRIBUTE VALUE TEMPLATES (AVT)
+----------------------------------
+To dynamically create attributes:
+<a href="product/{@id}">
+  <xsl:value-of select="name"/>
+</a>
+================================================================================

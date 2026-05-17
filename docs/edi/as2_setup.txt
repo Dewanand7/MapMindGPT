@@ -1,0 +1,22 @@
+---------------------------------------------------------
+AS2 CONNECTION CONFIGURATION PROFILE
+---------------------------------------------------------
+
+PARTNER NAME:      Global Widgets Inc.
+ENVIRONMENT:       Production / Staging
+
+AS2 IDENTIFIER:    WIDGET_CORP_AS2
+ENDPOINT URL:      https://as2.widgetcorp.com:443/pyX12
+
+ENCRYPTION:        AES-256 (Preferred)
+SIGNING ALGORITHM: SHA-256
+MDN TYPE:          Asynchronous (Requested via HTTPS)
+
+PUBLIC CERTIFICATE: [Attach public_cert.cer here]
+IP ALLOWLIST:      192.168.1.10, 10.0.0.5
+
+NOTES:
+- All outbound files must be signed and encrypted.
+- MDN signatures are required for non-repudiation.
+- Port 443 must be open for inbound traffic from our IP range.
+---------------------------------------------------------

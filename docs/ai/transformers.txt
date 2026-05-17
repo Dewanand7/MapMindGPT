@@ -1,0 +1,29 @@
+================================================================================
+TRANSFORMER ARCHITECTURE: CORE PRINCIPLES & STRUCTURE
+================================================================================
+
+1. OVERVIEW
+-----------
+The Transformer is a deep learning model introduced in "Attention Is All You Need" 
+(2017). Unlike previous RNNs or LSTMs, it processes data in parallel rather than 
+sequentially, drastically reducing training times and improving long-range 
+dependency capture.
+
+2. KEY COMPONENTS
+-----------------
+* Encoder: Processes the input sequence and generates a continuous representation.
+* Decoder: Uses the encoder's representation to generate an output sequence 
+  one element at a time.
+* Positional Encoding: Since there are no recurrences, this adds information 
+  about the relative or absolute position of tokens in the sequence.
+
+3. ARCHITECTURAL FLOW
+---------------------
+Input -> Tokenization -> Positional Encoding -> Multi-Head Attention -> 
+Add & Norm -> Feed Forward -> Add & Norm -> Linear -> Softmax Output.
+
+4. ADVANTAGES
+-------------
+- Parallelization: All tokens are processed simultaneously.
+- Global Context: Every token "sees" every other token regardless of distance.
+================================================================================

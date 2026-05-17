@@ -1,0 +1,30 @@
+================================================================================
+SEEBURGER BIC (BUSINESS INTEGRATION CONVERTER) - MAPPING DESIGNER
+================================================================================
+
+1. THE BIC MAPPING PHILOSOPHY
+-----------------------------
+BIC uses a graphical designer to create mappings (.mme files) that are compiled 
+into executable Java code. It supports any-to-any conversions (EDI to XML, 
+Flat-file to JSON, etc.).
+
+2. CORE FUNCTIONS AND LOGIC
+---------------------------
+* Cross-Referencing: Using 'Table Lookups' to map internal codes to partner codes.
+* Variables: Global and Local variables for counter management and state tracking.
+* Functions:
+  - `date_format()`: Standardizing date strings (e.g., YYYYMMDD to DD.MM.YYYY).
+  - `trim()`: Removing white spaces from fixed-length files.
+  - `if_then_else()`: Complex conditional logic for segment population.
+
+3. MAPPING STRUCTURE
+--------------------
+* Source Side: The input structure definition (e.g., X12 850 Schema).
+* Target Side: The output structure definition (e.g., IDOC or Canonical XML).
+* Mapping Rules: The visual links and functional blocks connecting the two.
+
+4. DEPLOYMENT
+-------------
+Mappings must be "Compiled" and uploaded to the BIS Repository. Once deployed, 
+they are referenced in the "Process Logic" to be used during runtime.
+================================================================================

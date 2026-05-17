@@ -1,0 +1,28 @@
+================================================================================
+XPATH 1.0/2.0 NAVIGATION CHEATSHEET
+================================================================================
+
+1. PATH SELECTION
+-----------------
+/nodename    : Selects from the root node
+//nodename   : Selects nodes in the document from the current node that match 
+               selection no matter where they are
+.            : Selects the current node
+..           : Selects the parent of the current node
+@            : Selects attributes
+
+2. PREDICATES (FILTERING)
+-------------------------
+/bookstore/book[1]          : Selects the first book element
+/bookstore/book[last()]     : Selects the last book element
+//title[@lang='en']         : Selects titles with 'lang' attribute set to 'en'
+//book[price > 35.00]       : Selects books with a price greater than 35
+
+3. USEFUL FUNCTIONS
+-------------------
+contains(str, sub)  : Returns true if string contains substring
+starts-with(s1, s2) : Returns true if s1 starts with s2
+normalize-space()   : Strips leading/trailing whitespace
+count(node-set)     : Returns number of nodes in set
+concat(s1, s2, ...) : Joins multiple strings
+================================================================================
