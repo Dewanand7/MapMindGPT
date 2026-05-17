@@ -1,0 +1,32 @@
+================================================================================
+ATTENTION MECHANISMS: SCALED DOT-PRODUCT & MULTI-HEAD
+================================================================================
+
+1. CORE CONCEPT
+---------------
+Attention allows the model to focus on specific parts of the input sequence 
+when producing a specific part of the output. It calculates a "relevance score" 
+between tokens.
+
+2. SCALED DOT-PRODUCT ATTENTION
+-------------------------------
+The mechanism uses three primary vectors:
+* Query (Q): What I am looking for.
+* Key (K): What I have to offer.
+* Value (V): The information I provide.
+
+Formula: Attention(Q, K, V) = softmax((QK^T) / sqrt(d_k))V
+
+3. MULTI-HEAD ATTENTION (MHA)
+-----------------------------
+Instead of performing one single attention function, MHA runs multiple 
+"heads" in parallel. Each head learns to attend to different types of 
+information (e.g., one head for grammar, one for coreference, one for intent).
+
+4. TYPES OF ATTENTION
+---------------------
+* Self-Attention: Tokens in a sequence attend to other tokens in the same sequence.
+* Cross-Attention: Decoder tokens attend to Encoder output tokens.
+* Masked Attention: Prevents the model from "looking ahead" at future tokens 
+  during training (common in GPT-style models).
+================================================================================

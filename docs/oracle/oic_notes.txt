@@ -1,0 +1,58 @@
+================================================================================
+ORACLE INTEGRATION CLOUD (OIC) ARCHITECTURE & BEST PRACTICES ARCHIVE
+================================================================================
+
+1. INTEGRATION DESIGN PATTERNS
+------------------------------
+* App-Driven Orchestration:
+  - Real-time synchronous (Request-Response) or asynchronous interaction patterns.
+  - Best used when immediate system handshake verification is required by SaaS wrappers.
+
+* Scheduled Orchestration:
+  - Batch execution paradigm driven by Cron-like schedules or explicitly triggered.
+  - Used for daily syncs, data lakes extractions, and multi-file processing runs.
+
+* Publish / Subscribe (Pub-Sub):
+  - Leverages the internal OIC Message Broker. One integration publishes an event 
+    (e.g., "New Customer Created"), and multiple independent integrations subscribe to it.
+
+2. HYBRID ARCHITECTURE & THE CONNECTIVITY AGENT
+----------------------------------------------
+* Ground-to-Cloud Bridging:
+  - The OIC Connectivity Agent must be installed on-premise within the secure network zone.
+  - It establishes an outbound-only HTTPS polling connection (port 443) back to OIC.
+  - Eliminates the need to open incoming firewall ports on-premise.
+* Agent High Availability (HA):
+  - Always deploy Agents in an Agent Group consisting of at least two nodes across 
+    separate physical VM environments to prevent single points of failure.
+
+3. MEMORY MANAGEMENT & LARGE FILE HEURISTICS
+---------------------------------------------
+* Payload Thresholds:
+  - Maximum standard payload processing limit for inline JSON/XML is 10MB.
+  - Payloads exceeding 10MB will trigger Out Of Memory (OOM) aborts or gateway drops.
+* The "Stage File" Pattern:
+  - To process large CSV or text files up to 50MB, download the file locally to the 
+    OIC virtual environment using an FTP/Stage action.
+  - Use the "Read File in Chunks" operation within a "ForEach" loop.
+  - This keeps only a tiny sub-segment of data rows in JVM memory at any single instant.
+
+4. EXCEPTION HANDLING STRUCTURE
+-------------------------------
+* Scope Level Fault Handlers:
+  - Localized block wrappers analogous to Java `try {} catch () {}`.
+  - Used to gracefully handle specific step failures (e.g., API authentication expires, 
+    triggering a token renewal step inside the fault branch).
+* Global Fault Handler:
+  - The ultimate fallback routine for the entire integration instance flow.
+  - Must include steps to format an enterprise alert email, log tracking identifiers, 
+    and systematically call notification webhooks.
+
+5. PERFORMANCE TUNING CHECKLIST
+-------------------------------
+1. Turn off high-level payload tracking in production environments. Set tracing to 
+   "Audit Only" or "None" unless actively troubleshooting bugs.
+2. Minimize nested ForEach loops. Opt for specialized XSLT multi-level looping expressions.
+3. Cache static lookups using OIC Lookups tables rather than executing live SQL queries 
+   against backends during every single transaction.
+================================================================================

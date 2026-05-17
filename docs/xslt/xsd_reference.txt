@@ -1,0 +1,44 @@
+================================================================================
+XSD (XML SCHEMA DEFINITION) QUICK REFERENCE
+================================================================================
+
+1. BASIC DATA TYPES
+-------------------
+xs:string   : Character strings
+xs:decimal  : Decimal numbers
+xs:integer  : Whole numbers
+xs:boolean  : true/false
+xs:date     : YYYY-MM-DD
+xs:dateTime : YYYY-MM-DDThh:mm:ss
+
+2. ELEMENT DEFINITIONS
+----------------------
+* Simple Element:
+<xs:element name="order_id" type="xs:string"/>
+
+* Complex Element (with children):
+<xs:element name="address">
+  <xs:complexType>
+    <xs:sequence>
+      <xs:element name="street" type="xs:string"/>
+      <xs:element name="city" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+
+3. OCCURRENCE CONSTRAINTS
+-------------------------
+minOccurs="0" : Optional element
+maxOccurs="1" : Default (only one allowed)
+maxOccurs="unbounded" : Unlimited repetitions (for lists/arrays)
+
+4. ENUMERATIONS (RESTRICTIONS)
+------------------------------
+<xs:simpleType name="StatusType">
+  <xs:restriction base="xs:string">
+    <xs:enumeration value="PENDING"/>
+    <xs:enumeration value="SHIPPED"/>
+    <xs:enumeration value="CANCELLED"/>
+  </xs:restriction>
+</xs:simpleType>
+================================================================================

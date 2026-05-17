@@ -1,0 +1,27 @@
+================================================================================
+SEEBURGER BIS - ROUTING AND WORKFLOW EXAMPLES
+================================================================================
+
+1. CONTENT-BASED ROUTING (CBR)
+------------------------------
+Routing is determined by the values inside the message.
+Example: 
+IF (Message.SenderID == 'WIDGET_CORP' AND Message.TotalAmount > 10000)
+THEN Route to 'Approval_Workflow'
+ELSE Route to 'Standard_ERP_Queue'
+
+2. PROTOCOL-BASED ROUTING
+-------------------------
+Messages are routed based on how they arrived:
+* AS2 Inbound -> Decrypt -> Map to ERP -> Send to SAP.
+* SFTP Inbound -> Virus Scan -> Archive -> Move to File Share.
+
+3. WORKFLOW (PROCESS) EXAMPLE: AS2 INBOUND
+------------------------------------------
+Step 1: Receive Message (Adapter: AS2_Receiver)
+Step 2: Log MDN Status (Acknowledgment)
+Step 3: Identification (Identify Partner by AS2-From header)
+Step 4: Mapping (Execute BIC Mapping: X12_to_IDOC)
+Step 5: Delivery (Adapter: SAP_ALE_Outbound)
+Step 6: Completion (Archive Original and Resulting Files)
+================================================================================

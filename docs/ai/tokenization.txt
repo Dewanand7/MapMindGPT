@@ -1,0 +1,33 @@
+================================================================================
+TOKENIZATION STRATEGIES IN NLP
+================================================================================
+
+1. WHAT IS TOKENIZATION?
+------------------------
+The process of breaking down a raw string of text into smaller units called 
+"tokens." These tokens are then mapped to numerical IDs that the model 
+can understand.
+
+2. MAJOR METHODS
+----------------
+* Word-level: Splits by whitespace. Problem: Huge vocabulary and "Out of 
+  Vocabulary" (OOV) issues.
+* Character-level: Splits into individual letters. Problem: Very long 
+  sequences and loss of semantic meaning.
+* Subword-level: The modern standard. Breaks rare words into meaningful 
+  pieces (e.g., "unhappiness" -> "un", "happi", "ness").
+
+3. COMMON ALGORITHMS
+--------------------
+* BPE (Byte Pair Encoding): Iteratively merges the most frequent pair of 
+  characters/sequences. Used by GPT models.
+* WordPiece: Similar to BPE but uses a likelihood-based merge. Used by BERT.
+* SentencePiece: Treats whitespace as a character, making it language-agnostic.
+
+4. SPECIAL TOKENS
+-----------------
+- [CLS]: Classification token (start of sequence).
+- [SEP]: Separator token (ends a sentence).
+- [PAD]: Padding to ensure uniform sequence length.
+- [MASK]: Used in masked language modeling.
+================================================================================

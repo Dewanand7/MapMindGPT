@@ -1,0 +1,35 @@
+ORACLE SOA DEHYDRATION
+
+Oracle SOA dehydration is the process of persisting the state of long-running BPEL processes into the dehydration store database.
+
+Why dehydration exists:
+- Long-running processes should not stay in JVM memory indefinitely.
+- Oracle persists process state to the database.
+- When needed, the process is rehydrated and resumed.
+
+Common dehydration triggers:
+- wait activity
+- receive activity
+- callback invocation
+- asynchronous partner links
+- human workflow pauses
+
+Dehydration store:
+- stored in Oracle database
+- tables hold instance state
+- engine reloads state when required
+
+Common issues:
+- stuck instances
+- dehydration store growth
+- slow DB performance
+- stale callbacks
+- instance recovery failures
+
+Troubleshooting:
+1. Check Enterprise Manager instance state
+2. Check SOA server logs
+3. Verify dehydration DB performance
+4. Review composite audit trail
+5. Check invoke/receive correlation
+6. Purge old instances if DB grows too large

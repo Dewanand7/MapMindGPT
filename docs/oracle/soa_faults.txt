@@ -1,0 +1,85 @@
+================================================================================
+ORACLE SOA SUITE: ADVANCED FAULT HANDLING FRAMEWORK & REFERENCE GUIDE
+================================================================================
+
+1. THE ARCHITECTURE OF FAULT HANDLING
+-------------------------------------
+Oracle SOA Suite separates fault handling into two distinct layer types:
+A. Infrastructure / System Faults: Handled by the Fault Handling Framework
+   via policies (`fault-policies.xml` and `fault-bindings.xml`).
+B. Business Faults: Handled directly within the BPEL orchestration using 
+   `<catch>` and `<catchAll>` blocks.
+
+2. RUNTIME FAULTS VS. BUSINESS FAULTS
+-------------------------------------
+* Runtime/System Faults:
+  - `bpelx:remoteFault`: Communication failure between the SOA composite and the 
+    target service (e.g., HTTP 404, 503, connection timeout).
+  - `bpelx:bindingFault`: Data mismatch or contract violation. Occurs when the 
+    outbound XML fails schema validation against the target WSDL.
+  - `bpelx:subLanguageExecutionFault`: Errors inside expression evaluations, 
+    such as XPath errors or data type mismatches during string manipulation.
+
+* Business Faults:
+  - Explicitly defined in the service WSDL.
+  - Represents a known functional application exception (e.g., `InsufficientFunds`, 
+    `ItemOutOfStock`, `InvalidAccountStatus`).
+
+3. SAMPLE FAULT POLICY CONFIGURATION (`fault-policies.xml`)
+-----------------------------------------------------------
+<?xml version="1.0" encoding="UTF-8"?>
+<faultPolicies xmlns="http://schemas.oracle.com/bpel/faultpolicy">
+    
+    <faultPolicy id="EnterpriseStandardPolicy">
+        <Conditions>
+            <!-- Catch Remote Faults for Auto-Retry -->
+            <FaultName name="bpelx:remoteFault">
+                <Action id="ora-retry-backoff"/>
+            </FaultName>
+            
+            <!-- Catch Binding Faults for Immediate Human Intervention -->
+            <FaultName name="bpelx:bindingFault">
+                <Action id="ora-human-intervention"/>
+            </FaultName>
+        </Conditions>
+        
+        <Actions>
+            <!-- Exponential Backoff Retry Strategy -->
+            <Action id="ora-retry-backoff">
+                <retry>
+                    <retryCount>3</retryCount>
+                    <retryInterval>10</retryInterval>
+                    <exponentialBackoff/>
+                </retry>
+            </Action>
+            
+            <!-- Move instance to the SOA Hospital for manual recovery -->
+            <Action id="ora-human-intervention">
+                <humanIntervention/>
+            </Action>
+            
+            <!-- Terminate the process cleanly -->
+            <Action id="ora-terminate">
+                <abort/>
+            </Action>
+        </Actions>
+    </faultPolicy>
+</faultPolicies>
+
+4. COMPOSITE BINDING RULES (`fault-bindings.xml`)
+-------------------------------------------------
+<?xml version="1.0" encoding="UTF-8"?>
+<faultRules xmlns="http://schemas.oracle.com/bpel/faultpolicy">
+    <!-- Apply the standard policy to all components within the composite -->
+    <composite faultPolicy="EnterpriseStandardPolicy"/>
+</faultRules>
+
+5. SYSTEM RESOLUTION STEPS & BEST PRACTICES
+-------------------------------------------
+1. Always implement exponential backoff for external REST/SOAP endpoints to 
+   prevent overwhelming downstream systems during recovery windows.
+2. Ensure `ora-human-intervention` is applied only to non-idempotent service calls 
+   where automatic retries might cause duplicate transactions.
+3. Use the SOA Enterprise Manager (EM) Console to search the "Error Hospital" 
+   to replay failed instances once backend targets resume normal operations.
+================================================================================
