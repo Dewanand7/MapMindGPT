@@ -495,7 +495,7 @@ def load_resources():
     return embed_model, index, chunks
 
 
-def add_uploaded_document(uploaded_file):
+def add_uploaded_document(uploaded_file, rebuild: bool = True):
     valid, message = validate_uploaded_file(uploaded_file)
     if not valid:
         st.error(message)
@@ -514,7 +514,8 @@ def add_uploaded_document(uploaded_file):
     with open(dest_path, 'w', encoding='utf-8') as f:
         f.write(text)
     write_audit_event('upload_document', {'filename': os.path.basename(dest_path), 'source_name': uploaded_file.name, 'chars': len(text)})
-    rebuild_index()
+    if rebuild:
+        rebuild_index()
     return True
 
 
@@ -1065,13 +1066,39 @@ with st.sidebar:
                     st.markdown(f"**{idx}. {item.get('source', 'unknown')}** · `{item.get('category', 'unknown')}`")
                     st.code(format_snippet(item.get('text', ''), length=420))
     
-    uploaded_file = st.file_uploader('Upload Document', type=UPLOAD_TYPES)
-    
-    if uploaded_file:
-        with st.spinner('Processing document...'):
-            if add_uploaded_document(uploaded_file):
-                st.success('Document uploaded and indexed.')
-                st.rerun()
+    uploaded_files = st.file_uploader('Upload Documents', type=UPLOAD_TYPES, accept_multiple_files=True)
+
+    if uploaded_files:
+        if st.button('Process Uploads'):
+            processed = 0
+            skipped = 0
+            upload_results = []
+            progress = st.progress(0)
+            status_text = st.empty()
+            total_uploads = len(uploaded_files)
+            with st.spinner('Processing documents...'):
+                for index, uploaded_file in enumerate(uploaded_files, start=1):
+                    status_text.write(f'Processing {index}/{total_uploads}: {uploaded_file.name}')
+                    if add_uploaded_document(uploaded_file, rebuild=False):
+                        processed += 1
+                        upload_results.append({'file': uploaded_file.name, 'status': 'indexed'})
+                    else:
+                        skipped += 1
+                        upload_results.append({'file': uploaded_file.name, 'status': 'skipped'})
+                    progress.progress(index / total_uploads)
+                if processed:
+                    status_text.write('Rebuilding index...')
+                    rebuild_index()
+                    write_audit_event('batch_upload_documents', {'processed': processed, 'skipped': skipped})
+            status_text.write('Upload processing complete')
+            st.session_state.upload_results = upload_results
+            st.success(f'Indexed {processed} document(s). Skipped {skipped}.')
+            st.rerun()
+
+    if 'upload_results' in st.session_state:
+        with st.expander('Last Upload Results', expanded=False):
+            for result in st.session_state.upload_results:
+                st.write(f"{result['status']}: {result['file']}")
     
     uploaded_docs = get_uploaded_documents()
     if uploaded_docs:

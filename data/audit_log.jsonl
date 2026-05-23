@@ -1,0 +1,26 @@
+{"timestamp": "2026-05-24T02:34:48.825930", "action": "upload_document", "details": {"filename": "XSLT_Basics.txt.txt", "source_name": "XSLT Basics.txt", "chars": 4224}}
+{"timestamp": "2026-05-24T02:34:49.523516", "action": "upload_document", "details": {"filename": "ORACLE_OIC.docx.txt", "source_name": "ORACLE_OIC.docx", "chars": 43669}}
+{"timestamp": "2026-05-24T02:34:49.775519", "action": "upload_document", "details": {"filename": "Oracle_SOA.docx.txt", "source_name": "Oracle_SOA.docx", "chars": 46328}}
+{"timestamp": "2026-05-24T02:34:49.804921", "action": "upload_document", "details": {"filename": "oracle_DB_By-Sam.docx.txt", "source_name": "oracle_DB_By-Sam.docx", "chars": 568}}
+{"timestamp": "2026-05-24T02:34:49.881994", "action": "upload_document", "details": {"filename": "What_is_EDI.docx.txt", "source_name": "What is EDI.docx", "chars": 17624}}
+{"timestamp": "2026-05-24T02:34:51.295725", "action": "upload_document", "details": {"filename": "IZO-434.pdf.txt", "source_name": "IZO-434.pdf", "chars": 41309}}
+{"timestamp": "2026-05-24T02:35:08.422743", "action": "upload_document", "details": {"filename": "Experiments.txt.txt", "source_name": "Experiments.txt", "chars": 4113}}
+{"timestamp": "2026-05-24T02:35:11.812721", "action": "upload_document", "details": {"filename": "Git.pdf.txt", "source_name": "Git.pdf", "chars": 89026}}
+{"timestamp": "2026-05-24T02:35:12.220997", "action": "upload_document", "details": {"filename": "ESS_Scheduler_Configuration_v1.1.pdf.txt", "source_name": "ESS_Scheduler_Configuration_v1.1.pdf", "chars": 4961}}
+{"timestamp": "2026-05-24T02:35:13.545925", "action": "upload_document", "details": {"filename": "univer_xslt-2-0-cheat-sheet.pdf.txt", "source_name": "univer_xslt-2-0-cheat-sheet.pdf", "chars": 9997}}
+{"timestamp": "2026-05-24T02:37:29.712293", "action": "delete_uploaded_document", "details": {"filename": "univer_xslt-2-0-cheat-sheet.pdf.txt"}}
+{"timestamp": "2026-05-24T02:41:24.528042", "action": "clear_uploaded_knowledge", "details": {"deleted_files": 0}}
+{"timestamp": "2026-05-24T02:42:52.937994", "action": "upload_document", "details": {"filename": "XSLT_Basics.txt.txt", "source_name": "XSLT Basics.txt", "chars": 4224}}
+{"timestamp": "2026-05-24T02:42:53.367631", "action": "upload_document", "details": {"filename": "ORACLE_OIC.docx.txt", "source_name": "ORACLE_OIC.docx", "chars": 43669}}
+{"timestamp": "2026-05-24T02:42:53.688243", "action": "upload_document", "details": {"filename": "Oracle_SOA.docx.txt", "source_name": "Oracle_SOA.docx", "chars": 46328}}
+{"timestamp": "2026-05-24T02:42:53.713241", "action": "upload_document", "details": {"filename": "oracle_DB_By-Sam.docx.txt", "source_name": "oracle_DB_By-Sam.docx", "chars": 568}}
+{"timestamp": "2026-05-24T02:42:53.825765", "action": "upload_document", "details": {"filename": "What_is_EDI.docx.txt", "source_name": "What is EDI.docx", "chars": 17624}}
+{"timestamp": "2026-05-24T02:42:55.191813", "action": "upload_document", "details": {"filename": "IZO-434.pdf.txt", "source_name": "IZO-434.pdf", "chars": 41309}}
+{"timestamp": "2026-05-24T02:43:11.557560", "action": "upload_document", "details": {"filename": "Experiments.txt.txt", "source_name": "Experiments.txt", "chars": 4113}}
+{"timestamp": "2026-05-24T02:43:15.514518", "action": "upload_document", "details": {"filename": "Git.pdf.txt", "source_name": "Git.pdf", "chars": 89026}}
+{"timestamp": "2026-05-24T02:43:15.885824", "action": "upload_document", "details": {"filename": "ESS_Scheduler_Configuration_v1.1.pdf.txt", "source_name": "ESS_Scheduler_Configuration_v1.1.pdf", "chars": 4961}}
+{"timestamp": "2026-05-24T02:43:16.825084", "action": "upload_document", "details": {"filename": "univer_xslt-2-0-cheat-sheet.pdf.txt", "source_name": "univer_xslt-2-0-cheat-sheet.pdf", "chars": 9997}}
+{"timestamp": "2026-05-24T02:43:38.296095", "action": "upload_document", "details": {"filename": "e40540.pdf.txt", "source_name": "e40540.pdf", "chars": 1061838}}
+{"timestamp": "2026-05-24T02:43:38.403639", "action": "upload_document", "details": {"filename": "OIC_Interview_Guide_v2.docx.txt", "source_name": "OIC_Interview_Guide_v2.docx", "chars": 4200}}
+{"timestamp": "2026-05-24T02:48:01.620053", "action": "batch_upload_documents", "details": {"processed": 12, "skipped": 3}}
+{"timestamp": "2026-05-24T02:55:18.788150", "action": "rebuild_index", "details": {"trigger": "ui"}}
