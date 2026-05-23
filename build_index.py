@@ -3,6 +3,7 @@ import pickle
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from document_loader import is_supported_document, read_document
 
 DOCS_DIR = "docs"
 INDEX_FILE = "data/vector.index"
@@ -32,13 +33,14 @@ def split_text(text, chunk_size=300, overlap=80):
 
 for root, _, files in os.walk(DOCS_DIR):
     for file in files:
-        if file.endswith(".txt"):
+        if is_supported_document(file):
             path = os.path.join(root, file)
 
             print("Reading:", path)
 
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read()
+            text = read_document(path)
+            if not text.strip():
+                continue
 
             doc_chunks = split_text(text)
 

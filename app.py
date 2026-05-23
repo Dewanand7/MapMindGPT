@@ -1,8 +1,11 @@
 import logging
+import hashlib
 import json
 import os
 import pickle
 import re
+import subprocess
+import sys
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
@@ -12,12 +15,9 @@ import numpy as np
 import ollama
 import streamlit as st
 import torch
-from docx import Document
-from io import BytesIO
-from xml.etree import ElementTree as etree
-from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from tokenizers import ByteLevelBPETokenizer
+from document_loader import UPLOAD_TYPES, is_supported_document, read_document, read_uploaded_document
 from model.config import Config
 from model.checkpoint import load_model_checkpoint
 from model.transformer import GPT
@@ -29,8 +29,12 @@ META_FILE = 'data/chunks.pkl'
 DOCS_ROOT = 'docs'
 UPLOAD_DIR = os.path.join(DOCS_ROOT, 'uploads')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CACHE_FILE = 'data/response_cache.pkl'
+CACHE_FILE = 'data/response_cache.json'
+LEGACY_CACHE_FILE = 'data/response_cache.pkl'
 FEEDBACK_FILE = 'data/feedback.jsonl'
+AUDIT_LOG_FILE = 'data/audit_log.jsonl'
+MAX_UPLOAD_SIZE_MB = 25
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 os.makedirs('data', exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -48,6 +52,157 @@ AVAILABLE_MODELS = ['MapMindGPT-Custom','qwen2.5:7b-instruct','llama3:8b','mistr
 AVAILABLE_MODES = ['General Chat','Code Assistant','EDI Expert','Oracle Expert','XSLT/XPath Expert','SEEBURGER Expert']
 
 st.set_page_config(page_title='MapMindGPT', layout='wide')
+
+
+def inject_material_ui():
+    st.markdown(
+        """
+        <style>
+        :root {
+            --mm-primary: #2563eb;
+            --mm-border: #d6dee8;
+            --mm-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 8px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        section[data-testid="stSidebar"] {
+            border-right: 1px solid var(--mm-border);
+        }
+
+        .block-container {
+            padding-top: 2rem;
+            max-width: 1180px;
+        }
+
+        .mapmind-appbar {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            min-height: 86px;
+            padding: 1.15rem 1.3rem;
+            margin: 0 0 1.5rem 0;
+            background: rgba(30, 41, 59, 0.96);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            box-shadow: var(--mm-shadow);
+            color: #f8fafc;
+            overflow: hidden;
+        }
+
+        .mapmind-title {
+            display: flex;
+            flex-direction: column;
+            min-width: 260px;
+            gap: 0.35rem;
+            justify-content: center;
+            flex: 1 1 auto;
+        }
+
+        .mapmind-title strong {
+            display: block;
+            font-size: 1.55rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            line-height: 1.15;
+            color: #f8fafc;
+        }
+
+        .mapmind-title span {
+            color: #cbd5e1;
+            display: block;
+            font-size: 0.9rem;
+            line-height: 1.3;
+        }
+
+        .mapmind-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            justify-content: flex-end;
+            min-width: 0;
+        }
+
+        .mapmind-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0.28rem 0.65rem;
+            border: 1px solid rgba(148, 163, 184, 0.32);
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.72);
+            color: #e2e8f0;
+            font-size: 0.78rem;
+            white-space: nowrap;
+        }
+
+        .stButton > button,
+        .stDownloadButton > button {
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            transition: transform 120ms ease, box-shadow 120ms ease;
+        }
+
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
+            transform: translateY(-1px);
+        }
+
+        div[data-testid="stChatInput"] {
+            border-top: 1px solid var(--mm-border);
+        }
+
+        div[data-testid="stChatInput"] textarea,
+        div[data-testid="stChatInput"] textarea:focus,
+        div[data-testid="stChatInput"] textarea:focus-visible {
+            border-color: rgba(148, 163, 184, 0.45) !important;
+            box-shadow: none !important;
+            outline: none !important;
+        }
+
+        div[data-testid="stChatInput"] > div {
+            border-color: rgba(148, 163, 184, 0.45) !important;
+            box-shadow: none !important;
+        }
+
+        @media (max-width: 760px) {
+            .mapmind-appbar {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .mapmind-pills {
+                justify-content: flex-start;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_appbar(model: str, mode: str, indexed_chunks: int):
+    st.markdown(
+        f"""
+        <div class="mapmind-appbar">
+            <div class="mapmind-title">
+                <strong>MapMindGPT</strong>
+                <span>Local RAG and custom model workspace</span>
+            </div>
+            <div class="mapmind-pills">
+                <span class="mapmind-pill">{model}</span>
+                <span class="mapmind-pill">{mode}</span>
+                <span class="mapmind-pill">{DEVICE}</span>
+                <span class="mapmind-pill">{indexed_chunks} chunks</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+inject_material_ui()
 
 
 def get_system_prompt(mode):
@@ -145,12 +300,20 @@ def is_low_quality_custom_response(response: str) -> bool:
     unique_ratio = len(set(words)) / max(len(words), 1)
     repeated_word_count = Counter(words).most_common(1)[0][1]
     symbol_ratio = len(re.findall(r"[^A-Za-z0-9\s.,;:!?()'\"/-]", text)) / max(len(text), 1)
+    punctuation_ratio = len(re.findall(r"[.,;:!?<>=*/-]", text)) / max(len(text), 1)
+    short_word_ratio = sum(1 for word in words if len(word) <= 2) / max(len(words), 1)
+    average_word_length = sum(len(word) for word in words) / max(len(words), 1)
+    malformed_runs = len(re.findall(r"[:.,!?<>*/=-]{3,}", text))
     arrow_noise = text.count("->") + text.count("→")
 
     return (
         unique_ratio < 0.35
         or repeated_word_count >= 8
         or symbol_ratio > 0.08
+        or punctuation_ratio > 0.18
+        or short_word_ratio > 0.45
+        or average_word_length < 3.0
+        or malformed_runs >= 2
         or arrow_noise >= 4
     )
 
@@ -212,20 +375,7 @@ def is_custom_unavailable_response(response: str) -> bool:
 
 def read_uploaded_file(uploaded_file):
     try:
-        name = uploaded_file.name.lower()
-        uploaded_file.seek(0)
-        if name.endswith('.txt'):
-            return uploaded_file.read().decode('utf-8', errors='ignore')
-        if name.endswith('.pdf'):
-            reader = PdfReader(BytesIO(uploaded_file.read()))
-            return '\n'.join([p.extract_text() for p in reader.pages if p.extract_text()])
-        if name.endswith('.docx'):
-            doc = Document(uploaded_file)
-            return '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
-        if name.endswith('.xml'):
-            tree = etree.parse(uploaded_file)
-            root = tree.getroot()
-            return etree.tostring(root, encoding='unicode')
+        return read_uploaded_document(uploaded_file)
     except Exception as e:
         logging.exception('Failed to read uploaded file: %s', uploaded_file.name)
         st.error(f'File read failed: {e}')
@@ -234,20 +384,7 @@ def read_uploaded_file(uploaded_file):
 
 def read_file_from_disk(path):
     try:
-        lower = path.lower()
-        if lower.endswith('.txt'):
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
-        if lower.endswith('.pdf'):
-            reader = PdfReader(path)
-            return '\n'.join([p.extract_text() for p in reader.pages if p.extract_text()])
-        if lower.endswith('.docx'):
-            doc = Document(path)
-            return '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
-        if lower.endswith('.xml'):
-            tree = etree.parse(path)
-            root = tree.getroot()
-            return etree.tostring(root, encoding='unicode')
+        return read_document(path)
     except Exception:
         logging.exception('Failed to read file from disk: %s', path)
         return ''
@@ -257,7 +394,28 @@ def read_file_from_disk(path):
 def sanitize_filename(name):
     name = os.path.basename(name)
     safe = re.sub(r'[^a-zA-Z0-9_.-]+', '_', name)
-    return safe[:200]
+    safe = safe.strip('._') or f'upload_{uuid.uuid4().hex[:8]}'
+    return safe[:160]
+
+
+def safe_upload_path(filename: str) -> str:
+    base_dir = os.path.abspath(UPLOAD_DIR)
+    path = os.path.abspath(os.path.join(base_dir, sanitize_filename(filename)))
+    if os.path.commonpath([base_dir, path]) != base_dir:
+        raise ValueError('Invalid upload path')
+    return path
+
+
+def validate_uploaded_file(uploaded_file) -> Tuple[bool, str]:
+    ext = os.path.splitext(uploaded_file.name.lower())[1]
+    if ext.lstrip('.') not in UPLOAD_TYPES:
+        return False, f'Unsupported file type: {ext or "unknown"}'
+
+    size = getattr(uploaded_file, 'size', None)
+    if size is not None and size > MAX_UPLOAD_SIZE_BYTES:
+        return False, f'File is too large. Maximum upload size is {MAX_UPLOAD_SIZE_MB} MB.'
+
+    return True, ''
 
 
 def is_uploaded_source(source):
@@ -292,7 +450,7 @@ def scan_all_documents():
     docs = []
     for root, _, files in os.walk(DOCS_ROOT):
         for file in files:
-            if file.lower().endswith(('.txt','.pdf','.docx','.xml')):
+            if is_supported_document(file):
                 docs.append(os.path.join(root, file))
     return docs
 
@@ -338,17 +496,24 @@ def load_resources():
 
 
 def add_uploaded_document(uploaded_file):
+    valid, message = validate_uploaded_file(uploaded_file)
+    if not valid:
+        st.error(message)
+        return False
+
     text = read_uploaded_file(uploaded_file)
     if not text.strip():
         return False
-    filename = sanitize_filename(uploaded_file.name)
-    dest_path = os.path.join(UPLOAD_DIR, filename)
+
+    original_name = sanitize_filename(uploaded_file.name)
+    filename = f'{original_name}.txt'
+    dest_path = safe_upload_path(filename)
     if os.path.exists(dest_path):
         base, ext = os.path.splitext(filename)
-        filename = f'{base}_{uuid.uuid4().hex[:8]}{ext}'
-        dest_path = os.path.join(UPLOAD_DIR, filename)
+        dest_path = safe_upload_path(f'{base}_{uuid.uuid4().hex[:8]}{ext}')
     with open(dest_path, 'w', encoding='utf-8') as f:
         f.write(text)
+    write_audit_event('upload_document', {'filename': os.path.basename(dest_path), 'source_name': uploaded_file.name, 'chars': len(text)})
     rebuild_index()
     return True
 
@@ -358,15 +523,19 @@ def get_uploaded_documents():
 
 
 def delete_uploaded_document(filename):
-    path = os.path.join(UPLOAD_DIR, filename)
+    path = safe_upload_path(filename)
     if os.path.exists(path):
         os.remove(path)
+        write_audit_event('delete_uploaded_document', {'filename': filename})
     rebuild_index()
 
 
 def clear_uploaded_knowledge():
+    deleted = 0
     for file in get_uploaded_documents():
-        os.remove(os.path.join(UPLOAD_DIR, file))
+        os.remove(safe_upload_path(file))
+        deleted += 1
+    write_audit_event('clear_uploaded_knowledge', {'deleted_files': deleted})
     rebuild_index()
 
 
@@ -381,6 +550,30 @@ def detect_domain(query):
         if any(term in q for term in terms):
             return domain
     return None
+
+
+def domain_boost(item: Dict, domain: str) -> float:
+    if not domain:
+        return 0.0
+
+    category = item.get('category', '').lower()
+    source = item.get('source', '').lower()
+    text = item.get('text', '').lower()
+
+    boost = 0.0
+    if category == domain:
+        boost += 2.0
+    if source.startswith(f'{domain}/') or source.startswith(f'{domain}\\'):
+        boost += 1.5
+    if domain in source:
+        boost += 0.5
+
+    if domain == 'edi' and category in {'xslt', 'ai'} and 'edi' not in source:
+        boost -= 1.5
+    if domain == 'edi' and any(term in text for term in ['850', '810', '856', '997', 'x12', 'edifact', 'as2']):
+        boost += 0.5
+
+    return boost
 
 
 def compute_bm25_scores(query: str, chunks: List[Dict], k1: float = 1.5, b: float = 0.75) -> List[float]:
@@ -420,6 +613,7 @@ def retrieve_semantic(query: str, top_k: int, scope: str) -> List[Tuple[float, D
     embed_model, index, chunks = load_resources()
     if not chunks:
         return []
+    domain = detect_domain(query)
     q_emb = embed_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
     k = min(200, len(chunks))
     distances, ids = index.search(q_emb.astype(np.float32), k)
@@ -433,15 +627,17 @@ def retrieve_semantic(query: str, top_k: int, scope: str) -> List[Tuple[float, D
             continue
         if scope == 'Built-in docs' and is_uploaded_source(item['source']):
             continue
-        score = float(dist)
+        score = float(dist) + domain_boost(item, domain)
         results.append((score, item))
-    return results[:top_k * 3]
+    results.sort(key=lambda x: x[0], reverse=True)
+    return results[:top_k * 4]
 
 
 def retrieve_keyword(query: str, top_k: int, scope: str) -> List[Tuple[float, Dict]]:
     _, _, chunks = load_resources()
     if not chunks:
         return []
+    domain = detect_domain(query)
     
     filtered = chunks
     if scope == 'Uploaded only':
@@ -453,9 +649,9 @@ def retrieve_keyword(query: str, top_k: int, scope: str) -> List[Tuple[float, Di
         return []
     
     bm25_scores = compute_bm25_scores(query, filtered)
-    results = [(score, chunk) for score, chunk in zip(bm25_scores, filtered)]
+    results = [(score + domain_boost(chunk, domain), chunk) for score, chunk in zip(bm25_scores, filtered)]
     results.sort(key=lambda x: x[0], reverse=True)
-    return results[:top_k * 3]
+    return results[:top_k * 4]
 
 
 def reciprocal_rank_fusion(semantic: List[Tuple[float, Dict]], keyword: List[Tuple[float, Dict]], k: int = 60) -> List[Dict]:
@@ -477,15 +673,17 @@ def reciprocal_rank_fusion(semantic: List[Tuple[float, Dict]], keyword: List[Tup
 def rerank_results(query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
     if len(candidates) <= top_k:
         return candidates
+    domain = detect_domain(query)
     
     reranker = load_reranker()
     if reranker is None:
-        return candidates[:top_k]
+        ranked = sorted(candidates, key=lambda item: domain_boost(item, domain), reverse=True)
+        return ranked[:top_k]
     
     pairs = [[query, c['text']] for c in candidates]
     scores = reranker.predict(pairs)
     
-    ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
+    ranked = sorted(zip(scores, candidates), key=lambda x: float(x[0]) + domain_boost(x[1], domain), reverse=True)
     return [item for _, item in ranked[:top_k]]
 
 
@@ -493,7 +691,7 @@ def retrieve(query: str, top_k: int = 3, scope: str = 'All documents', use_reran
     semantic = retrieve_semantic(query, top_k, scope)
     keyword = retrieve_keyword(query, top_k, scope)
     
-    merged = reciprocal_rank_fusion(semantic, keyword)[:top_k * 3]
+    merged = reciprocal_rank_fusion(semantic, keyword)[:top_k * 4]
     
     if use_reranker and merged:
         return rerank_results(query, merged, top_k)
@@ -519,8 +717,9 @@ def truncate_context(context: List[Dict], max_tokens: int = 2000) -> List[Dict]:
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, 'rb') as f:
-                return pickle.load(f)
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
         except Exception:
             return {}
     return {}
@@ -528,15 +727,61 @@ def load_cache():
 
 def save_cache(cache):
     try:
-        with open(CACHE_FILE, 'wb') as f:
-            pickle.dump(cache, f)
+        limited_items = list(cache.items())[-500:]
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(dict(limited_items), f, ensure_ascii=False, indent=2)
     except Exception as e:
         logging.warning(f'Failed to save cache: {e}')
 
 
 def cache_key(query, context, model, mode):
-    context_ids = tuple(sorted([c.get('id', idx) for idx, c in enumerate(context)]))
-    return (query.strip().lower(), context_ids, model, mode)
+    context_ids = sorted([c.get('id', idx) for idx, c in enumerate(context)])
+    payload = {
+        'query': query.strip().lower(),
+        'context_ids': context_ids,
+        'model': model,
+        'mode': mode,
+        'version': 'v3'
+    }
+    raw_key = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
+
+
+def write_audit_event(action: str, details: Dict[str, Any] = None):
+    try:
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'action': action,
+            'details': details or {}
+        }
+        with open(AUDIT_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except Exception as e:
+        logging.warning(f'Failed to write audit event: {e}')
+
+
+def read_audit_events(limit: int = 20) -> List[Dict[str, Any]]:
+    if not os.path.exists(AUDIT_LOG_FILE):
+        return []
+    events = []
+    with open(AUDIT_LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return events[-limit:]
+
+
+def is_identity_query(query: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9\s]', '', query.lower()).strip()
+    return normalized in {
+        'what is your name',
+        'whats your name',
+        'who are you',
+        'your name',
+        'tell me your name'
+    }
 
 
 def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache: bool = True):
@@ -544,14 +789,25 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
 
     key = cache_key(query, context, model_name, mode)
 
-    if key in cache:
-        return cache[key]
-
     simple_query = query.strip().lower()
 
     # direct greetings
     if simple_query in ['hi', 'hello', 'hey', 'good morning', 'good evening']:
         return "Hello! How can I help you today?"
+
+    if is_identity_query(query):
+        return "My name is MapMindGPT. I can help you chat with your local knowledge base and custom model."
+
+    if key in cache:
+        cached_response = cache[key]
+        if model_name == 'MapMindGPT-Custom' and (
+            is_custom_unavailable_response(cached_response)
+            or is_low_quality_custom_response(cached_response)
+        ):
+            del cache[key]
+            save_cache(cache)
+        else:
+            return cached_response
 
     # custom model safety
     if model_name == 'MapMindGPT-Custom':
@@ -668,12 +924,104 @@ def export_conversation(messages: List[Dict], format_type: str = 'markdown') -> 
     return ''
 
 
-st.title('MapMindGPT')
+def run_project_command(args: List[str], timeout_seconds: int = 1800) -> Tuple[int, str]:
+    try:
+        result = subprocess.run(
+            [sys.executable, *args],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds
+        )
+        output = '\n'.join(part for part in [result.stdout, result.stderr] if part)
+        return result.returncode, output.strip()
+    except subprocess.TimeoutExpired as e:
+        output = '\n'.join(part for part in [e.stdout or '', e.stderr or ''] if part)
+        return 124, f"Command timed out after {timeout_seconds} seconds.\n{output}".strip()
+    except Exception as e:
+        logging.exception("Command failed")
+        return 1, str(e)
+
+
+def file_info(path: str) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        return {'exists': False, 'size': 0, 'modified': 'missing'}
+    stat = os.stat(path)
+    return {
+        'exists': True,
+        'size': stat.st_size,
+        'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+
+def format_size(size: int) -> str:
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f'{size:.0f} {unit}' if unit == 'B' else f'{size:.1f} {unit}'
+        size /= 1024
+    return f'{size:.1f} TB'
+
+
+def count_file_markers(path: str, marker: str) -> int:
+    if not os.path.exists(path):
+        return 0
+    count = 0
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            count += line.count(marker)
+    return count
+
+
+def get_custom_model_status() -> Dict[str, Any]:
+    checkpoint = file_info('checkpoints/model.pt')
+    vocab = file_info('tokenizer/vocab.json')
+    merges = file_info('tokenizer/merges.txt')
+    corpus = file_info('data/instruction_corpus.txt')
+    fallback_corpus = file_info('data/corpus.txt')
+    eval_file = file_info('data/eval_questions.json')
+
+    eval_count = 0
+    if eval_file['exists']:
+        try:
+            with open('data/eval_questions.json', 'r', encoding='utf-8') as f:
+                eval_count = len(json.load(f))
+        except Exception:
+            eval_count = 0
+
+    return {
+        'checkpoint': checkpoint,
+        'vocab': vocab,
+        'merges': merges,
+        'corpus': corpus,
+        'fallback_corpus': fallback_corpus,
+        'eval_file': eval_file,
+        'instruction_examples': count_file_markers('data/instruction_corpus.txt', '<eos>'),
+        'eval_count': eval_count,
+        'torch_version': getattr(torch, '__version__', 'unknown'),
+        'device': DEVICE,
+        'cuda_available': torch.cuda.is_available(),
+    }
+
 
 with st.sidebar:
     st.header('AI Settings')
     selected_model = st.selectbox('Choose Model', AVAILABLE_MODELS)
     selected_mode = st.selectbox('Choose Mode', AVAILABLE_MODES)
+
+    with st.expander('Custom Model Status', expanded=False):
+        status = get_custom_model_status()
+        model_ready = status['checkpoint']['exists'] and status['vocab']['exists'] and status['merges']['exists']
+        st.write(f"Ready: {'yes' if model_ready else 'no'}")
+        st.write(f"Device: {status['device']} | CUDA: {'yes' if status['cuda_available'] else 'no'}")
+        st.write(f"PyTorch: {status['torch_version']}")
+        st.write(f"Checkpoint: {format_size(status['checkpoint']['size'])} | {status['checkpoint']['modified']}")
+        st.write(f"Tokenizer vocab: {'found' if status['vocab']['exists'] else 'missing'}")
+        st.write(f"Tokenizer merges: {'found' if status['merges']['exists'] else 'missing'}")
+        if status['corpus']['exists']:
+            st.write(f"Instruction corpus: {format_size(status['corpus']['size'])} | {status['instruction_examples']} examples")
+        else:
+            st.write(f"Instruction corpus: missing; fallback corpus {format_size(status['fallback_corpus']['size'])}")
+        st.write(f"Eval questions: {status['eval_count']}")
     
     st.header('Retrieval Settings')
     use_reranker = st.checkbox('Use reranker', value=True)
@@ -689,8 +1037,35 @@ with st.sidebar:
     st.header('Knowledge Base')
     search_scope = st.radio('Search scope', ['All documents', 'Uploaded only', 'Built-in docs'])
     num_sources = st.slider('Sources to retrieve', 1, 10, 3)
+
+    with st.expander('Retrieval Test', expanded=False):
+        test_query = st.text_input('Test query', key='retrieval_test_query')
+        test_top_k = st.slider('Test sources', 1, 10, 5, key='retrieval_test_top_k')
+        if st.button('Test Retrieval'):
+            if test_query.strip():
+                test_results = retrieve(
+                    test_query,
+                    top_k=test_top_k,
+                    scope=search_scope,
+                    use_reranker=use_reranker
+                )
+                st.session_state.retrieval_test_results = {
+                    'query': test_query,
+                    'domain': detect_domain(test_query) or 'none',
+                    'results': test_results
+                }
+            else:
+                st.warning('Enter a query to test retrieval')
+
+        if 'retrieval_test_results' in st.session_state:
+            result_set = st.session_state.retrieval_test_results
+            st.caption(f"Detected domain: {result_set['domain']}")
+            for idx, item in enumerate(result_set['results'], start=1):
+                with st.container():
+                    st.markdown(f"**{idx}. {item.get('source', 'unknown')}** · `{item.get('category', 'unknown')}`")
+                    st.code(format_snippet(item.get('text', ''), length=420))
     
-    uploaded_file = st.file_uploader('Upload Document', type=['txt','pdf','docx','xml'])
+    uploaded_file = st.file_uploader('Upload Document', type=UPLOAD_TYPES)
     
     if uploaded_file:
         with st.spinner('Processing document...'):
@@ -706,7 +1081,7 @@ with st.sidebar:
         col1, col2 = st.columns(2)
         with col1:
             if st.button('Preview'):
-                doc_path = os.path.join(UPLOAD_DIR, selected_doc)
+                doc_path = safe_upload_path(selected_doc)
                 content = read_file_from_disk(doc_path)
                 st.session_state.preview_content = content[:2000]
         
@@ -723,6 +1098,7 @@ with st.sidebar:
     if st.button('Rebuild Index'):
         with st.spinner('Rebuilding...'):
             rebuild_index()
+        write_audit_event('rebuild_index', {'trigger': 'ui'})
         st.success('Index rebuilt')
         st.rerun()
     
@@ -734,6 +1110,84 @@ with st.sidebar:
     if st.button('Reset Chat'):
         st.session_state.messages = []
         st.rerun()
+
+    if st.button('Clear Response Cache'):
+        if os.path.exists(CACHE_FILE):
+            os.remove(CACHE_FILE)
+        if os.path.exists(LEGACY_CACHE_FILE):
+            os.remove(LEGACY_CACHE_FILE)
+        write_audit_event('clear_response_cache', {'trigger': 'ui'})
+        st.success('Response cache cleared')
+
+    with st.expander('Audit Log', expanded=False):
+        events = read_audit_events(limit=15)
+        if events:
+            for event in reversed(events):
+                st.caption(f"{event.get('timestamp', '')} · {event.get('action', '')}")
+                if event.get('details'):
+                    st.code(json.dumps(event.get('details'), ensure_ascii=False))
+        else:
+            st.info('No audit events yet')
+
+    st.header('Custom Model Training')
+    train_steps = st.number_input('Training steps', min_value=100, max_value=50000, value=1000, step=100)
+    eval_iters = st.number_input('Eval iterations', min_value=5, max_value=200, value=20, step=5)
+    train_timeout = st.number_input('Timeout seconds', min_value=60, max_value=7200, value=1800, step=60)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button('Build Dataset'):
+            with st.spinner('Building instruction dataset...'):
+                code, output = run_project_command(['build_instruction_dataset.py'], timeout_seconds=300)
+            st.session_state.training_output = output or 'No output'
+            write_audit_event('build_instruction_dataset', {'return_code': code})
+            if code == 0:
+                st.success('Instruction dataset built')
+            else:
+                st.error('Dataset build failed')
+
+    with col2:
+        if st.button('Run Eval'):
+            with st.spinner('Evaluating custom model...'):
+                code, output = run_project_command(['eval_custom_model.py'], timeout_seconds=600)
+            st.session_state.training_output = output or 'No output'
+            write_audit_event('run_eval', {'return_code': code})
+            if code == 0:
+                st.success('Evaluation complete')
+            else:
+                st.error('Evaluation failed')
+
+    if st.button('Build Feedback Dataset'):
+        with st.spinner('Converting positive feedback into training examples...'):
+            code, output = run_project_command(['feedback_to_instruction_dataset.py'], timeout_seconds=300)
+        st.session_state.training_output = output or 'No output'
+        write_audit_event('build_feedback_dataset', {'return_code': code})
+        if code == 0:
+            st.success('Feedback dataset built')
+        else:
+            st.error('Feedback dataset build failed')
+
+    if st.button('Train Custom Model'):
+        with st.spinner('Training custom model... this can take a while.'):
+            code, output = run_project_command(
+                [
+                    'train.py',
+                    '--max-steps', str(int(train_steps)),
+                    '--eval-iters', str(int(eval_iters))
+                ],
+                timeout_seconds=int(train_timeout)
+            )
+        st.session_state.training_output = output or 'No output'
+        write_audit_event('train_custom_model', {'return_code': code, 'steps': int(train_steps), 'eval_iters': int(eval_iters)})
+        if code == 0:
+            load_custom_model.clear()
+            st.success('Training complete. Custom model cache cleared.')
+        else:
+            st.error('Training failed')
+
+    if 'training_output' in st.session_state:
+        with st.expander('Training Output', expanded=False):
+            st.code(st.session_state.training_output[-6000:])
     
     st.header('Export')
     export_format = st.selectbox('Format', ['markdown', 'json'])
@@ -744,6 +1198,8 @@ with st.sidebar:
             st.download_button('Download', exported, file_name=f'conversation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.{ext}')
         else:
             st.warning('No conversation to export')
+
+render_appbar(selected_model, selected_mode, len(chunks))
 
 if 'messages' not in st.session_state:
     st.session_state.messages = []

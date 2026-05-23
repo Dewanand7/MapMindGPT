@@ -1,3 +1,4 @@
+import argparse
 import os
 import torch
 import math
@@ -10,14 +11,36 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using: {device}")
 
 CHECKPOINT_PATH = "checkpoints/model.pt"
+FEEDBACK_TRAIN_FILE = "data/feedback_instruction_corpus.txt"
 os.makedirs("checkpoints", exist_ok=True)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train MapMindGPT-Custom.")
+    parser.add_argument("--data-file", default=None)
+    parser.add_argument("--max-steps", type=int, default=Config.max_steps)
+    parser.add_argument("--batch-size", type=int, default=Config.batch_size)
+    parser.add_argument("--eval-iters", type=int, default=20)
+    return parser.parse_args()
+
+
+args = parse_args()
+TRAIN_FILE = args.data_file or ("data/instruction_corpus.txt" if os.path.exists("data/instruction_corpus.txt") else "data/corpus.txt")
 
 # Load tokenizer
 tokenizer = ByteLevelBPETokenizer("tokenizer/vocab.json", "tokenizer/merges.txt")
 
 # Load dataset
-with open("data/corpus.txt", "r", encoding="utf-8") as f:
+print(f"Training data: {TRAIN_FILE}")
+with open(TRAIN_FILE, "r", encoding="utf-8") as f:
     text = f.read()
+
+if args.data_file is None and os.path.exists(FEEDBACK_TRAIN_FILE):
+    with open(FEEDBACK_TRAIN_FILE, "r", encoding="utf-8") as f:
+        feedback_text = f.read().strip()
+    if feedback_text:
+        text = f"{text}\n\n{feedback_text}"
+        print(f"Included feedback training data: {FEEDBACK_TRAIN_FILE}")
 
 tokens = tokenizer.encode(text).ids
 data = torch.tensor(tokens, dtype=torch.long)
@@ -37,7 +60,8 @@ validate_split("train", train_data)
 validate_split("val", val_data)
 
 
-def get_batch(split, batch_size=Config.batch_size):
+def get_batch(split, batch_size=None):
+    batch_size = batch_size or args.batch_size
     source = train_data if split == "train" else val_data
     ix = torch.randint(0, len(source) - Config.block_size, (batch_size,))
     x = torch.stack([source[i:i + Config.block_size] for i in ix])
@@ -45,7 +69,8 @@ def get_batch(split, batch_size=Config.batch_size):
     return x.to(device), y.to(device)
 
 @torch.no_grad()
-def estimate_loss(model, eval_iters=20):
+def estimate_loss(model, eval_iters=None):
+    eval_iters = eval_iters or args.eval_iters
     model.eval()
     out = {}
     for split in ["train", "val"]:
@@ -70,7 +95,7 @@ if os.path.exists(CHECKPOINT_PATH):
         print(f"Checkpoint incompatible, starting fresh: {e}")
 
 # LR Scheduler Config
-max_steps = Config.max_steps
+max_steps = args.max_steps
 warmup_steps = Config.warmup_steps
 min_lr = Config.min_learning_rate
 
@@ -117,5 +142,6 @@ for step in range(max_steps):
                 CHECKPOINT_PATH,
                 step=step,
                 best_val=best_val,
+                train_file=TRAIN_FILE,
                 config={k: v for k, v in Config.__dict__.items() if not k.startswith("_")}
             )

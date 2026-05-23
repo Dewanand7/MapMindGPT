@@ -86,6 +86,15 @@ pip install ollama
 pip install pypdf
 pip install python-docx
 pip install lxml
+pip install openpyxl
+pip install PyYAML
+```
+
+Supported document types:
+
+```text
+.txt .md .markdown .log .edi .x12 .dat
+.pdf .docx .xlsx .csv .json .xml .html .htm .yaml .yml
 ```
 
 ---
@@ -155,6 +164,12 @@ tokenizer/merges.txt
 
 # 7. Train Custom Model (Optional)
 
+For better custom-model answers, first build the instruction-style corpus:
+
+```bash
+python build_instruction_dataset.py
+```
+
 If you want your own model:
 
 ```bash
@@ -166,6 +181,23 @@ Generates:
 ```text
 checkpoints/model.pt
 ```
+
+You can run a small keyword-based evaluation after training:
+
+```bash
+python eval_custom_model.py
+```
+
+The Streamlit sidebar also includes **Custom Model Training** controls to build the
+instruction dataset, train the custom model, and run evaluation from the UI.
+
+Positive chat feedback can also be converted into extra training examples:
+
+```bash
+python feedback_to_instruction_dataset.py
+```
+
+When `data/feedback_instruction_corpus.txt` exists, `train.py` includes it automatically.
 
 ---
 

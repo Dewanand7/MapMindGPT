@@ -1,0 +1,34 @@
+[
+  {
+    "question": "What is EDI?",
+    "expected_keywords": ["electronic data interchange", "business documents", "trading partners"]
+  },
+  {
+    "question": "What is an EDI 850?",
+    "expected_keywords": ["purchase order", "buyer", "seller"]
+  },
+  {
+    "question": "What is an EDI 810?",
+    "expected_keywords": ["invoice", "payment"]
+  },
+  {
+    "question": "What is an EDI 856?",
+    "expected_keywords": ["advance ship notice", "shipment"]
+  },
+  {
+    "question": "What is an EDI 997?",
+    "expected_keywords": ["functional acknowledgement", "accepted", "rejected"]
+  },
+  {
+    "question": "What is XPath?",
+    "expected_keywords": ["select", "xml", "nodes"]
+  },
+  {
+    "question": "What is Oracle OIC?",
+    "expected_keywords": ["oracle integration cloud", "integration"]
+  },
+  {
+    "question": "What is SEEBURGER BIS?",
+    "expected_keywords": ["b2b", "edi", "integration"]
+  }
+]
