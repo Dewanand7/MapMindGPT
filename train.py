@@ -1,196 +1,121 @@
 import os
 import torch
+import math
 from tokenizers import ByteLevelBPETokenizer
-
 from model.config import Config
+from model.checkpoint import load_model_checkpoint, save_model_checkpoint
 from model.transformer import GPT
 
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
-print("Using:", device)
+print(f"Using: {device}")
 
 CHECKPOINT_PATH = "checkpoints/model.pt"
+os.makedirs("checkpoints", exist_ok=True)
 
-
-# -----------------------------
 # Load tokenizer
-# -----------------------------
-tokenizer = ByteLevelBPETokenizer(
-    "tokenizer/vocab.json",
-    "tokenizer/merges.txt"
-)
+tokenizer = ByteLevelBPETokenizer("tokenizer/vocab.json", "tokenizer/merges.txt")
 
-
-# -----------------------------
 # Load dataset
-# -----------------------------
 with open("data/corpus.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-print("Characters:", len(text))
-
-encoded = tokenizer.encode(text)
-tokens = encoded.ids
-
+tokens = tokenizer.encode(text).ids
 data = torch.tensor(tokens, dtype=torch.long)
-
-print("Tokens:", len(data))
-
-
-# -----------------------------
-# Split dataset
-# -----------------------------
 n = int(0.9 * len(data))
+train_data, val_data = data[:n], data[n:]
 
-train_data = data[:n]
-val_data = data[n:]
-
-
-# -----------------------------
-# Batch generator
-# -----------------------------
-def get_batch(split, batch_size=16):
-    source = train_data if split == "train" else val_data
-
-    if len(source) <= Config.block_size:
+def validate_split(name, source):
+    min_tokens = Config.block_size + 1
+    if len(source) < min_tokens:
         raise ValueError(
-            f"Dataset too small. "
-            f"Tokens={len(source)}, "
-            f"block_size={Config.block_size}"
+            f"{name} split is too small for training. "
+            f"Need at least {min_tokens} tokens, got {len(source)}."
         )
 
-    ix = torch.randint(
-        0,
-        len(source) - Config.block_size,
-        (batch_size,)
-    )
 
-    x = torch.stack([
-        source[i:i + Config.block_size]
-        for i in ix
-    ])
+validate_split("train", train_data)
+validate_split("val", val_data)
 
-    y = torch.stack([
-        source[i + 1:i + Config.block_size + 1]
-        for i in ix
-    ])
 
+def get_batch(split, batch_size=Config.batch_size):
+    source = train_data if split == "train" else val_data
+    ix = torch.randint(0, len(source) - Config.block_size, (batch_size,))
+    x = torch.stack([source[i:i + Config.block_size] for i in ix])
+    y = torch.stack([source[i+1:i + Config.block_size + 1] for i in ix])
     return x.to(device), y.to(device)
 
-
-# -----------------------------
-# Validation loss
-# -----------------------------
 @torch.no_grad()
 def estimate_loss(model, eval_iters=20):
     model.eval()
-
-    losses = {}
-
+    out = {}
     for split in ["train", "val"]:
-        split_losses = []
-
-        for _ in range(eval_iters):
-            xb, yb = get_batch(split)
-            _, loss = model(xb, yb)
-            split_losses.append(loss.item())
-
-        losses[split] = sum(split_losses) / len(split_losses)
-
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            _, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean().item()
     model.train()
-    return losses
+    return out
 
-
-# -----------------------------
-# Build model
-# -----------------------------
 model = GPT(Config()).to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=Config.learning_rate, weight_decay=0.1)
+scaler = torch.amp.GradScaler("cuda") if device == "cuda" else None
 
-print("Parameters:", sum(p.numel() for p in model.parameters()))
-
-
-# -----------------------------
-# Optimizer
-# -----------------------------
-optimizer = torch.optim.AdamW(
-    model.parameters(),
-    lr=3e-4
-)
-
-
-# -----------------------------
-# Mixed precision scaler
-# -----------------------------
-if device == "cuda":
-    scaler = torch.amp.GradScaler("cuda")
-else:
-    scaler = None
-
-
-# -----------------------------
-# Load checkpoint if compatible
-# -----------------------------
 if os.path.exists(CHECKPOINT_PATH):
     try:
-        print("Loading checkpoint...")
+        load_model_checkpoint(model, CHECKPOINT_PATH, device)
+        print("Loaded existing checkpoint")
+    except RuntimeError as e:
+        print(f"Checkpoint incompatible, starting fresh: {e}")
 
-        model.load_state_dict(
-            torch.load(
-                CHECKPOINT_PATH,
-                map_location=device,
-                weights_only=True
-            )
-        )
+# LR Scheduler Config
+max_steps = Config.max_steps
+warmup_steps = Config.warmup_steps
+min_lr = Config.min_learning_rate
 
-        print("Checkpoint loaded successfully")
+def get_lr(it):
+    if it < warmup_steps:
+        return Config.learning_rate * it / warmup_steps
+    if it > max_steps:
+        return min_lr
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (Config.learning_rate - min_lr)
 
-    except RuntimeError:
-        print("Checkpoint incompatible with current model config.")
-        print("Starting fresh training.")
-
-
-# -----------------------------
-# Training loop
-# -----------------------------
-max_steps = 5000
+# Training Loop
 best_val = float("inf")
-
 for step in range(max_steps):
-    xb, yb = get_batch("train")
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
-    optimizer.zero_grad()
+    xb, yb = get_batch("train")
 
     if device == "cuda":
         with torch.amp.autocast("cuda"):
             _, loss = model(xb, yb)
-
         scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), Config.grad_clip)
         scaler.step(optimizer)
         scaler.update()
-
     else:
         _, loss = model(xb, yb)
         loss.backward()
         optimizer.step()
 
+    optimizer.zero_grad(set_to_none=True)
+
     if step % 100 == 0:
         losses = estimate_loss(model)
-
-        print(
-            f"Step {step} | "
-            f"Train Loss: {losses['train']:.4f} | "
-            f"Val Loss: {losses['val']:.4f}"
-        )
-
+        print(f"Step {step}: Train {losses['train']:.4f}, Val {losses['val']:.4f}, LR {lr:.2e}")
         if losses["val"] < best_val:
             best_val = losses["val"]
-
-            torch.save(
-                model.state_dict(),
-                CHECKPOINT_PATH
+            save_model_checkpoint(
+                model,
+                CHECKPOINT_PATH,
+                step=step,
+                best_val=best_val,
+                config={k: v for k, v in Config.__dict__.items() if not k.startswith("_")}
             )
-
-            print("Best checkpoint saved")
-
-
-print("Training complete")

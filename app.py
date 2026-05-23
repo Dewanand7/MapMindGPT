@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import pickle
 import re
@@ -18,6 +19,7 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from tokenizers import ByteLevelBPETokenizer
 from model.config import Config
+from model.checkpoint import load_model_checkpoint
 from model.transformer import GPT
 from collections import Counter
 import math
@@ -77,25 +79,135 @@ def load_reranker():
 @st.cache_resource
 def load_custom_model():
     try:
-        tokenizer = ByteLevelBPETokenizer('tokenizer/vocab.json', 'tokenizer/merges.txt')
+        vocab_path = 'tokenizer/vocab.json'
+        merges_path = 'tokenizer/merges.txt'
+        checkpoint_path = 'checkpoints/model.pt'
+
+        missing = [path for path in [vocab_path, merges_path, checkpoint_path] if not os.path.exists(path)]
+        if missing:
+            raise FileNotFoundError(f"Missing custom model files: {', '.join(missing)}")
+
+        tokenizer = ByteLevelBPETokenizer(
+            vocab_path,
+            merges_path
+        )
+
         model = GPT(Config()).to(DEVICE)
-        model.load_state_dict(torch.load('checkpoints/model.pt', map_location=DEVICE))
+        load_model_checkpoint(model, checkpoint_path, DEVICE)
         model.eval()
+
         return tokenizer, model
+
     except Exception as e:
-        logging.error(f'Failed to load custom model: {e}')
+        logging.exception("Custom model load failed")
+        st.error(f"Custom model load failed: {e}")
         return None, None
 
 
-def generate_custom_response(prompt, max_tokens=500):
+def generate_custom_response(prompt, max_tokens=220):
     tokenizer, model = load_custom_model()
     if tokenizer is None or model is None:
         return 'Custom model not available. Please select an Ollama model.'
     encoded = tokenizer.encode(prompt)
     idx = torch.tensor([encoded.ids], dtype=torch.long).to(DEVICE)
+    eos_token_id = tokenizer.token_to_id('<eos>')
+
     with torch.no_grad():
-        output = model.generate(idx, max_new_tokens=max_tokens, temperature=0.8, top_k=50)
-    return tokenizer.decode(output[0].tolist())
+        output = model.generate(
+            idx,
+            max_new_tokens=max_tokens,
+            temperature=0.75,
+            top_k=40,
+            top_p=0.9,
+            repetition_penalty=1.12,
+            eos_token_id=eos_token_id
+        )
+
+    new_tokens = output[0, idx.size(1):].tolist()
+    response = tokenizer.decode(new_tokens).strip()
+
+    for marker in ['User:', 'Question:', 'Context:', '<eos>']:
+        if marker in response:
+            response = response.split(marker, 1)[0].strip()
+
+    return response or "I don't have enough signal in the local custom model to answer that well yet."
+
+
+def is_low_quality_custom_response(response: str) -> bool:
+    text = response.strip()
+    if len(text) < 20:
+        return True
+
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", text.lower())
+    if len(words) < 5:
+        return True
+
+    unique_ratio = len(set(words)) / max(len(words), 1)
+    repeated_word_count = Counter(words).most_common(1)[0][1]
+    symbol_ratio = len(re.findall(r"[^A-Za-z0-9\s.,;:!?()'\"/-]", text)) / max(len(text), 1)
+    arrow_noise = text.count("->") + text.count("→")
+
+    return (
+        unique_ratio < 0.35
+        or repeated_word_count >= 8
+        or symbol_ratio > 0.08
+        or arrow_noise >= 4
+    )
+
+
+def build_custom_fallback_answer(query: str, context: List[Dict]) -> str:
+    keywords = set(extract_keywords(query))
+    sentences = []
+    detected_domain = detect_domain(query)
+
+    for item in context:
+        source = item.get('source', 'source')
+        category = item.get('category', 'unknown')
+        for sentence in re.split(r"(?<=[.!?])\s+", item.get('text', '')):
+            clean = ' '.join(sentence.split())
+            if not clean:
+                continue
+            tokens = set(extract_keywords(clean))
+            if keywords and not keywords.intersection(tokens):
+                continue
+            score = len(keywords.intersection(tokens))
+            if detected_domain and category == detected_domain:
+                score += 5
+            if detected_domain and detected_domain in source.lower():
+                score += 2
+            if detected_domain == 'edi' and category in {'xslt', 'ai'}:
+                score -= 4
+            sentences.append((score, clean, source))
+
+    if 'edi' in keywords:
+        intro = (
+            "EDI, or Electronic Data Interchange, is the structured computer-to-computer "
+            "exchange of business documents between trading partners."
+        )
+        overview = [
+            "- It replaces manual exchange of business documents with standardized electronic messages.",
+            "- Common EDI documents include purchase orders, invoices, shipment notices, and acknowledgements.",
+            "- In ANSI X12, examples include 850 Purchase Order, 810 Invoice, 856 Advance Ship Notice, and 997 Functional Acknowledgement."
+        ]
+    else:
+        intro = "The local custom model could not generate a clean answer, so here is the best answer from the retrieved knowledge base."
+        overview = []
+
+    sentences.sort(key=lambda item: item[0], reverse=True)
+    selected = [(sentence, source) for _, sentence, source in sentences[:3]]
+    if not selected:
+        selected = [(format_snippet(item.get('text', ''), length=220), item.get('source', 'source')) for item in context[:2]]
+
+    details = []
+    for sentence, source in selected:
+        if sentence:
+            details.append(f"- {sentence} [{source}]")
+
+    return '\n'.join([intro, *overview, *details])
+
+
+def is_custom_unavailable_response(response: str) -> bool:
+    return response.startswith('Custom model not available')
 
 
 def read_uploaded_file(uploaded_file):
@@ -201,10 +313,7 @@ def rebuild_index():
     if all_chunks:
         embeddings = embed_model.encode([c['text'] for c in all_chunks], convert_to_numpy=True, normalize_embeddings=True)
         ids = np.arange(len(all_chunks), dtype=np.int64)
-        # Use index directly with FAISS API
-        idx = index.index
-        idx.add(embeddings.astype(np.float32))
-        index.id_map = faiss.swig_ptr(ids)
+        index.add_with_ids(embeddings.astype(np.float32), ids)
     faiss.write_index(index, INDEX_FILE)
     with open(META_FILE, 'wb') as f:
         pickle.dump(all_chunks, f)
@@ -220,6 +329,11 @@ def load_resources():
     index = faiss.read_index(INDEX_FILE)
     with open(META_FILE, 'rb') as f:
         chunks = pickle.load(f)
+    for idx, chunk in enumerate(chunks):
+        chunk.setdefault('id', idx)
+        chunk.setdefault('source', f'document_{idx}')
+        chunk.setdefault('category', 'unknown')
+        chunk.setdefault('text', '')
     return embed_model, index, chunks
 
 
@@ -308,7 +422,7 @@ def retrieve_semantic(query: str, top_k: int, scope: str) -> List[Tuple[float, D
         return []
     q_emb = embed_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
     k = min(200, len(chunks))
-    distances, ids = index.search(q_emb, k)
+    distances, ids = index.search(q_emb.astype(np.float32), k)
     
     results = []
     for dist, idx in zip(distances[0], ids[0]):
@@ -421,7 +535,7 @@ def save_cache(cache):
 
 
 def cache_key(query, context, model, mode):
-    context_ids = tuple(sorted([c['id'] for c in context]))
+    context_ids = tuple(sorted([c.get('id', idx) for idx, c in enumerate(context)]))
     return (query.strip().lower(), context_ids, model, mode)
 
 
@@ -441,13 +555,10 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
 
     # custom model safety
     if model_name == 'MapMindGPT-Custom':
-        if len(query.split()) > 12:
-            return "MapMindGPT-Custom is experimental. Please use an Ollama model for complex questions."
-
         if not context:
             return "I don't have relevant knowledge for that query."
 
-        context = truncate_context(context, max_tokens=800)
+        context = truncate_context(context, max_tokens=1200)
 
         context_text = '\n\n'.join(
             [f"[{c['source']}]\n{c['text']}" for c in context]
@@ -458,16 +569,19 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
         prompt = f"""
 {system_prompt}
 
+Use only the context below. If the context is not enough, say what is missing.
+Keep the answer concise and practical.
+
 Context:
 {context_text}
 
-Question:
-{query}
-
-Answer:
+User: {query}
+Assistant:
 """
 
-        response = generate_custom_response(prompt, max_tokens=150)
+        response = generate_custom_response(prompt, max_tokens=180)
+        if is_custom_unavailable_response(response) or is_low_quality_custom_response(response):
+            response = build_custom_fallback_answer(query, context)
 
         if use_cache:
             cache[key] = response
@@ -536,7 +650,7 @@ def save_feedback(query: str, response: str, rating: str):
     try:
         with open(FEEDBACK_FILE, 'a', encoding='utf-8') as f:
             entry = {'timestamp': datetime.now().isoformat(), 'query': query, 'response': response, 'rating': rating}
-            f.write(str(entry) + '\n')
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
     except Exception as e:
         logging.warning(f'Failed to save feedback: {e}')
 
