@@ -2,6 +2,7 @@ import argparse
 import os
 import torch
 import math
+import time
 from tokenizers import ByteLevelBPETokenizer
 from model.config import Config
 from model.checkpoint import load_model_checkpoint, save_model_checkpoint
@@ -18,10 +19,26 @@ os.makedirs("checkpoints", exist_ok=True)
 def parse_args():
     parser = argparse.ArgumentParser(description="Train MapMindGPT-Custom.")
     parser.add_argument("--data-file", default=None)
-    parser.add_argument("--max-steps", type=int, default=Config.max_steps)
-    parser.add_argument("--batch-size", type=int, default=Config.batch_size)
-    parser.add_argument("--eval-iters", type=int, default=20)
-    return parser.parse_args()
+    parser.add_argument("--preset", choices=["quick", "balanced", "full"], default="quick")
+    parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--eval-iters", type=int, default=None)
+    parser.add_argument("--eval-interval", type=int, default=None)
+    parser.add_argument("--fresh", action="store_true", help="Start from random weights instead of loading checkpoints/model.pt.")
+    parser.add_argument("--learning-rate", type=float, default=Config.learning_rate)
+    args = parser.parse_args()
+
+    presets = {
+        "quick": {"max_steps": 300, "batch_size": 8, "eval_iters": 5, "eval_interval": 50},
+        "balanced": {"max_steps": 1200, "batch_size": 16, "eval_iters": 10, "eval_interval": 100},
+        "full": {"max_steps": Config.max_steps, "batch_size": Config.batch_size, "eval_iters": 20, "eval_interval": 100},
+    }
+    selected = presets[args.preset]
+    args.max_steps = args.max_steps or selected["max_steps"]
+    args.batch_size = args.batch_size or selected["batch_size"]
+    args.eval_iters = args.eval_iters or selected["eval_iters"]
+    args.eval_interval = args.eval_interval or selected["eval_interval"]
+    return args
 
 
 args = parse_args()
@@ -32,6 +49,10 @@ tokenizer = ByteLevelBPETokenizer("tokenizer/vocab.json", "tokenizer/merges.txt"
 
 # Load dataset
 print(f"Training data: {TRAIN_FILE}")
+print(
+    f"Preset: {args.preset} | Steps: {args.max_steps} | "
+    f"Batch: {args.batch_size} | Eval iters: {args.eval_iters} | Eval every: {args.eval_interval}"
+)
 with open(TRAIN_FILE, "r", encoding="utf-8") as f:
     text = f.read()
 
@@ -84,10 +105,12 @@ def estimate_loss(model, eval_iters=None):
     return out
 
 model = GPT(Config()).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=Config.learning_rate, weight_decay=0.1)
+optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.1)
 scaler = torch.amp.GradScaler("cuda") if device == "cuda" else None
 
-if os.path.exists(CHECKPOINT_PATH):
+if args.fresh:
+    print("Fresh training: not loading existing checkpoint")
+elif os.path.exists(CHECKPOINT_PATH):
     try:
         load_model_checkpoint(model, CHECKPOINT_PATH, device)
         print("Loaded existing checkpoint")
@@ -97,19 +120,34 @@ if os.path.exists(CHECKPOINT_PATH):
 # LR Scheduler Config
 max_steps = args.max_steps
 warmup_steps = Config.warmup_steps
+warmup_steps = min(warmup_steps, max(10, max_steps // 10))
 min_lr = Config.min_learning_rate
 
 def get_lr(it):
     if it < warmup_steps:
-        return Config.learning_rate * it / warmup_steps
+        return args.learning_rate * max(it + 1, 1) / warmup_steps
     if it > max_steps:
         return min_lr
     decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
-    return min_lr + coeff * (Config.learning_rate - min_lr)
+    return min_lr + coeff * (args.learning_rate - min_lr)
 
 # Training Loop
 best_val = float("inf")
+start_time = time.time()
+
+
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {sec}s"
+    if minutes:
+        return f"{minutes}m {sec}s"
+    return f"{sec}s"
+
+
 for step in range(max_steps):
     lr = get_lr(step)
     for param_group in optimizer.param_groups:
@@ -132,9 +170,20 @@ for step in range(max_steps):
 
     optimizer.zero_grad(set_to_none=True)
 
-    if step % 100 == 0:
+    if step % 10 == 0 or step == max_steps - 1:
+        elapsed = time.time() - start_time
+        done = step + 1
+        progress = done / max_steps
+        eta = elapsed / progress - elapsed if progress > 0 else 0
+        print(
+            f"Progress {done}/{max_steps} ({progress:.1%}) | "
+            f"Loss {loss.item():.4f} | Elapsed {format_duration(elapsed)} | ETA {format_duration(eta)}",
+            flush=True
+        )
+
+    if step % args.eval_interval == 0 or step == max_steps - 1:
         losses = estimate_loss(model)
-        print(f"Step {step}: Train {losses['train']:.4f}, Val {losses['val']:.4f}, LR {lr:.2e}")
+        print(f"Eval step {step}: Train {losses['train']:.4f}, Val {losses['val']:.4f}, LR {lr:.2e}", flush=True)
         if losses["val"] < best_val:
             best_val = losses["val"]
             save_model_checkpoint(
@@ -145,3 +194,6 @@ for step in range(max_steps):
                 train_file=TRAIN_FILE,
                 config={k: v for k, v in Config.__dict__.items() if not k.startswith("_")}
             )
+            print(f"Best checkpoint saved at step {step} with val loss {best_val:.4f}")
+
+print("Training complete")

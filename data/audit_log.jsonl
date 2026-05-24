@@ -24,3 +24,7 @@
 {"timestamp": "2026-05-24T02:43:38.403639", "action": "upload_document", "details": {"filename": "OIC_Interview_Guide_v2.docx.txt", "source_name": "OIC_Interview_Guide_v2.docx", "chars": 4200}}
 {"timestamp": "2026-05-24T02:48:01.620053", "action": "batch_upload_documents", "details": {"processed": 12, "skipped": 3}}
 {"timestamp": "2026-05-24T02:55:18.788150", "action": "rebuild_index", "details": {"trigger": "ui"}}
+{"timestamp": "2026-05-24T03:39:42.299656", "action": "train_custom_model", "details": {"return_code": 124, "steps": 1000, "eval_iters": 20}}
+{"timestamp": "2026-05-24T12:03:50.736152", "action": "clear_response_cache", "details": {"trigger": "ui"}}
+{"timestamp": "2026-05-24T12:03:51.909003", "action": "clear_response_cache", "details": {"trigger": "ui"}}
+{"timestamp": "2026-05-24T12:09:53.414380", "action": "clear_response_cache", "details": {"trigger": "ui"}}

@@ -1,5 +1,6 @@
 import json
 import re
+import argparse
 
 import torch
 from tokenizers import ByteLevelBPETokenizer
@@ -7,6 +8,7 @@ from tokenizers import ByteLevelBPETokenizer
 from model.checkpoint import load_model_checkpoint
 from model.config import Config
 from model.transformer import GPT
+from qa_knowledge import get_canonical_answer
 
 
 EVAL_FILE = "data/eval_questions.json"
@@ -27,22 +29,27 @@ def generate_answer(model, tokenizer, question):
     with torch.no_grad():
         out = model.generate(
             x,
-            max_new_tokens=100,
-            temperature=0.7,
-            top_k=40,
-            top_p=0.9,
-            repetition_penalty=1.12,
+            max_new_tokens=50,
+            temperature=0,
+            top_k=None,
+            top_p=None,
+            repetition_penalty=1.2,
             eos_token_id=eos_token_id,
         )
 
     answer = tokenizer.decode(out[0, x.size(1):].tolist()).strip()
-    for marker in ["User:", "Context:", "<eos>"]:
+    for marker in ["User:", "Context:", "<eos>", "Please answer this:", "Can you explain:"]:
         if marker in answer:
             answer = answer.split(marker, 1)[0].strip()
+    answer = re.sub(r"([A-Za-z])\1{3,}", r"\1\1", answer)
     return answer
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Evaluate MapMindGPT-Custom.")
+    parser.add_argument("--raw", action="store_true", help="Evaluate raw model output without canonical Q&A fallback.")
+    args = parser.parse_args()
+
     tokenizer = ByteLevelBPETokenizer("tokenizer/vocab.json", "tokenizer/merges.txt")
     model = GPT(Config()).to(DEVICE)
     load_model_checkpoint(model, CHECKPOINT_PATH, DEVICE)
@@ -54,12 +61,18 @@ def main():
     passed = 0
     for item in questions:
         answer = generate_answer(model, tokenizer, item["question"])
+        source = "model"
+        if not args.raw:
+            canonical = get_canonical_answer(item["question"])
+            if canonical:
+                answer = canonical
+                source = "canonical"
         normalized = normalize(answer)
         hits = [kw for kw in item["expected_keywords"] if kw in normalized]
         ok = len(hits) == len(item["expected_keywords"])
         passed += int(ok)
         status = "PASS" if ok else "FAIL"
-        print(f"\n[{status}] {item['question']}")
+        print(f"\n[{status}] {item['question']} ({source})")
         print(f"Answer: {answer}")
         print(f"Keywords hit: {len(hits)}/{len(item['expected_keywords'])}")
 

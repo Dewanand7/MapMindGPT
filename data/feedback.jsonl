@@ -1,2 +1,4 @@
 {'timestamp': '2026-05-23T20:50:30.259979', 'query': 'Hi', 'response': 'Hello! How can I help you today?', 'rating': 'positive'}
 {"timestamp": "2026-05-24T01:22:26.924941", "query": "What is EDI?", "response": "Custom model not available. Please select an Ollama model.", "rating": "negative"}
+{"timestamp": "2026-05-24T11:53:38.538253", "query": "what is your name?", "response": "My name is MapMindGPT. I can help you chat with your local knowledge base and custom model.", "rating": "positive"}
+{"timestamp": "2026-05-24T12:04:29.986424", "query": "what is EDI", "response": "EDI, or Electronic Data Interchange, is the structured computer-to-computer exchange of business documents between trading partners.", "rating": "positive"}

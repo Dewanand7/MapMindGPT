@@ -4,6 +4,7 @@ import json
 import os
 import pickle
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -21,6 +22,7 @@ from document_loader import UPLOAD_TYPES, is_supported_document, read_document, 
 from model.config import Config
 from model.checkpoint import load_model_checkpoint
 from model.transformer import GPT
+from qa_knowledge import get_canonical_answer
 from collections import Counter
 import math
 
@@ -316,6 +318,63 @@ def is_low_quality_custom_response(response: str) -> bool:
         or malformed_runs >= 2
         or arrow_noise >= 4
     )
+
+
+def is_domain_mismatch_response(query: str, response: str) -> bool:
+    domain = detect_domain(query)
+    if not domain:
+        return False
+
+    text = response.lower()
+    if domain == 'xslt':
+        return any(term in text for term in ['edi 850', 'edi 810', 'edi 856', 'edi 997', 'x12 transaction'])
+    if domain == 'edi':
+        return any(term in text for term in ['xpath', 'xslt', 'substring-before', 'xsl:value-of'])
+
+    return False
+
+
+def extract_function_terms(query: str) -> List[str]:
+    terms = re.findall(r'[A-Za-z_][\w:-]*\s*\(\)', query)
+    terms.extend(re.findall(r'\b(substring-before|substring-after|format-number|normalize-space|translate|string-length)\b', query, flags=re.IGNORECASE))
+    cleaned = []
+    for term in terms:
+        normalized = term.lower().replace(' ', '')
+        if not normalized.endswith('()') and '(' not in normalized:
+            normalized = f'{normalized}()'
+        if normalized not in cleaned:
+            cleaned.append(normalized)
+    return cleaned
+
+
+def build_rag_first_answer(query: str, context: List[Dict]) -> str:
+    function_terms = extract_function_terms(query)
+    if not function_terms:
+        return ''
+
+    matches = []
+    for item in context:
+        text = ' '.join(item.get('text', '').split())
+        lower_text = text.lower()
+        for term in function_terms:
+            bare_term = term[:-2] if term.endswith('()') else term
+            if term in lower_text or bare_term in lower_text:
+                pattern = re.compile(r'(.{0,180}' + re.escape(bare_term) + r'\s*\(?[^.]{0,260})', re.IGNORECASE)
+                found = pattern.findall(text)
+                snippet = found[0].strip() if found else format_snippet(text, length=360)
+                matches.append((term, snippet, item.get('source', 'source')))
+                break
+
+    if not matches:
+        return ''
+
+    term, snippet, source = matches[0]
+    answer_lines = [
+        f"From the retrieved document, `{term}` is used as follows:",
+        snippet,
+        f"Source: {source}"
+    ]
+    return '\n\n'.join(answer_lines)
 
 
 def build_custom_fallback_answer(query: str, context: List[Dict]) -> str:
@@ -774,6 +833,58 @@ def read_audit_events(limit: int = 20) -> List[Dict[str, Any]]:
     return events[-limit:]
 
 
+def list_checkpoints() -> List[str]:
+    if not os.path.exists('checkpoints'):
+        return []
+    return sorted(
+        [
+            file for file in os.listdir('checkpoints')
+            if file.lower().endswith(('.pt', '.pth'))
+            and os.path.isfile(os.path.join('checkpoints', file))
+        ]
+    )
+
+
+def sanitize_checkpoint_name(name: str) -> str:
+    safe = re.sub(r'[^a-zA-Z0-9_.-]+', '_', name.strip())
+    safe = safe.strip('._')
+    if not safe:
+        safe = f'checkpoint_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+    if not safe.lower().endswith('.pt'):
+        safe += '.pt'
+    return safe[:120]
+
+
+def checkpoint_path(name: str) -> str:
+    base_dir = os.path.abspath('checkpoints')
+    path = os.path.abspath(os.path.join(base_dir, sanitize_checkpoint_name(name)))
+    if os.path.commonpath([base_dir, path]) != base_dir:
+        raise ValueError('Invalid checkpoint path')
+    return path
+
+
+def backup_current_checkpoint(name: str) -> str:
+    source = checkpoint_path('model.pt')
+    if not os.path.exists(source):
+        raise FileNotFoundError('checkpoints/model.pt does not exist')
+    destination = checkpoint_path(name)
+    shutil.copy2(source, destination)
+    write_audit_event('backup_checkpoint', {'destination': os.path.basename(destination)})
+    return destination
+
+
+def restore_checkpoint(name: str):
+    source = checkpoint_path(name)
+    destination = checkpoint_path('model.pt')
+    if not os.path.exists(source):
+        raise FileNotFoundError(f'{name} does not exist')
+    if os.path.abspath(source) == os.path.abspath(destination):
+        return
+    shutil.copy2(source, destination)
+    load_custom_model.clear()
+    write_audit_event('restore_checkpoint', {'source': os.path.basename(source)})
+
+
 def is_identity_query(query: str) -> bool:
     normalized = re.sub(r'[^a-z0-9\s]', '', query.lower()).strip()
     return normalized in {
@@ -799,6 +910,10 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
     if is_identity_query(query):
         return "My name is MapMindGPT. I can help you chat with your local knowledge base and custom model."
 
+    canonical_answer = get_canonical_answer(query)
+    if canonical_answer:
+        return canonical_answer
+
     if key in cache:
         cached_response = cache[key]
         if model_name == 'MapMindGPT-Custom' and (
@@ -816,6 +931,12 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
             return "I don't have relevant knowledge for that query."
 
         context = truncate_context(context, max_tokens=1200)
+        rag_first_answer = build_rag_first_answer(query, context)
+        if rag_first_answer:
+            if use_cache:
+                cache[key] = rag_first_answer
+                save_cache(cache)
+            return rag_first_answer
 
         context_text = '\n\n'.join(
             [f"[{c['source']}]\n{c['text']}" for c in context]
@@ -837,7 +958,11 @@ Assistant:
 """
 
         response = generate_custom_response(prompt, max_tokens=180)
-        if is_custom_unavailable_response(response) or is_low_quality_custom_response(response):
+        if (
+            is_custom_unavailable_response(response)
+            or is_low_quality_custom_response(response)
+            or is_domain_mismatch_response(query, response)
+        ):
             response = build_custom_fallback_answer(query, context)
 
         if use_cache:
@@ -928,7 +1053,7 @@ def export_conversation(messages: List[Dict], format_type: str = 'markdown') -> 
 def run_project_command(args: List[str], timeout_seconds: int = 1800) -> Tuple[int, str]:
     try:
         result = subprocess.run(
-            [sys.executable, *args],
+            [sys.executable, '-u', *args],
             cwd=os.getcwd(),
             capture_output=True,
             text=True,
@@ -1023,6 +1148,37 @@ with st.sidebar:
         else:
             st.write(f"Instruction corpus: missing; fallback corpus {format_size(status['fallback_corpus']['size'])}")
         st.write(f"Eval questions: {status['eval_count']}")
+
+    with st.expander('Checkpoint Manager', expanded=False):
+        checkpoints = list_checkpoints()
+        if checkpoints:
+            selected_checkpoint = st.selectbox('Checkpoint', checkpoints, index=checkpoints.index('model.pt') if 'model.pt' in checkpoints else 0)
+            info = file_info(os.path.join('checkpoints', selected_checkpoint))
+            st.caption(f"{format_size(info['size'])} | {info['modified']}")
+        else:
+            selected_checkpoint = None
+            st.info('No checkpoints found')
+
+        backup_name = st.text_input('Backup name', value=f"model_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pt")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button('Save Backup'):
+                try:
+                    saved_path = backup_current_checkpoint(backup_name)
+                    st.success(f"Saved {os.path.basename(saved_path)}")
+                except Exception as e:
+                    st.error(f"Backup failed: {e}")
+        with col2:
+            if st.button('Restore Selected'):
+                if not selected_checkpoint:
+                    st.warning('Select a checkpoint first')
+                else:
+                    try:
+                        restore_checkpoint(selected_checkpoint)
+                        st.success(f"Restored {selected_checkpoint}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Restore failed: {e}")
     
     st.header('Retrieval Settings')
     use_reranker = st.checkbox('Use reranker', value=True)
@@ -1157,8 +1313,10 @@ with st.sidebar:
             st.info('No audit events yet')
 
     st.header('Custom Model Training')
-    train_steps = st.number_input('Training steps', min_value=100, max_value=50000, value=1000, step=100)
-    eval_iters = st.number_input('Eval iterations', min_value=5, max_value=200, value=20, step=5)
+    train_preset = st.selectbox('Training preset', ['quick', 'balanced', 'full'])
+    default_steps = {'quick': 300, 'balanced': 1200, 'full': Config.max_steps}[train_preset]
+    train_steps = st.number_input('Training steps', min_value=50, max_value=50000, value=default_steps, step=50)
+    eval_iters = st.number_input('Eval iterations', min_value=2, max_value=200, value=5 if train_preset == 'quick' else 10, step=1)
     train_timeout = st.number_input('Timeout seconds', min_value=60, max_value=7200, value=1800, step=60)
 
     col1, col2 = st.columns(2)
@@ -1199,6 +1357,7 @@ with st.sidebar:
             code, output = run_project_command(
                 [
                     'train.py',
+                    '--preset', train_preset,
                     '--max-steps', str(int(train_steps)),
                     '--eval-iters', str(int(eval_iters))
                 ],

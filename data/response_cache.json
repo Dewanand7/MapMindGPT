@@ -1,0 +1,3 @@
+{
+  "f514977e335212179e4df550da75e2d4fcf3ca334cc065ba861fae33641e5551": "From the retrieved document, `oraext:left-trim()` is used as follows:\n\noraext:left-trim()---to remove space from left oraext:left-trim (inputfield) number()---to convert string to numeric number(inputfield) string()---to convert numeric to string string(inputfield) xp20:subtract-dayTimeDuration-from-dateTime ()----days substract to date having format YYYY-MM-DD xp20:subtract-dayTimeDuration-fr\n\nSource: uploads\\XSLT_Basics.txt.txt"
+}

@@ -49,6 +49,34 @@ SEED_QA = [
         "What is SEEBURGER BIS?",
         "SEEBURGER BIS is a B2B integration platform used for EDI, partner onboarding, routing, and message processing.",
     ),
+    (
+        "What is the difference between EDI 850 and EDI 810?",
+        "EDI 850 is a purchase order sent by a buyer, while EDI 810 is an invoice sent by a supplier to request payment.",
+    ),
+    (
+        "What is the difference between EDI 856 and EDI 997?",
+        "EDI 856 is an advance ship notice for shipment details, while EDI 997 is a functional acknowledgement for acceptance or rejection.",
+    ),
+    (
+        "Is EDI 810 a purchase order?",
+        "No. EDI 810 is an invoice. EDI 850 is the purchase order transaction.",
+    ),
+    (
+        "Is EDI 850 an invoice?",
+        "No. EDI 850 is a purchase order. EDI 810 is the invoice transaction.",
+    ),
+    (
+        "List common EDI X12 transactions.",
+        "Common EDI X12 transactions include 850 Purchase Order, 810 Invoice, 856 Advance Ship Notice, and 997 Functional Acknowledgement.",
+    ),
+]
+
+QUESTION_VARIANTS = [
+    "{question}",
+    "Can you explain: {question}",
+    "Please answer this: {question}",
+    "Help me understand {question_lower}",
+    "Give a short answer. {question}",
 ]
 
 QUESTION_TEMPLATES = [
@@ -103,13 +131,22 @@ def format_example(question, answer, context=None, source=None):
     return "\n".join(parts)
 
 
-def build_examples(seed_repeats, doc_repeats):
+def build_examples(seed_repeats, doc_repeats, qa_only=False):
     examples = []
 
     for _ in range(seed_repeats):
         for question, answer in SEED_QA:
-            examples.append(format_example(question, answer))
-            examples.append(format_example(f"Can you explain: {question}", answer))
+            for template in QUESTION_VARIANTS:
+                examples.append(
+                    format_example(
+                        template.format(question=question, question_lower=question.lower()),
+                        answer
+                    )
+                )
+
+    if qa_only:
+        random.shuffle(examples)
+        return examples
 
     for domain, source, text in read_docs():
         for chunk in split_text(text):
@@ -127,13 +164,14 @@ def main():
     parser.add_argument("--output", default=OUTPUT_FILE)
     parser.add_argument("--seed-repeats", type=int, default=60)
     parser.add_argument("--doc-repeats", type=int, default=3)
+    parser.add_argument("--qa-only", action="store_true", help="Build only clean direct Q&A examples.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     random.seed(args.seed)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
-    examples = build_examples(args.seed_repeats, args.doc_repeats)
+    examples = build_examples(args.seed_repeats, args.doc_repeats, qa_only=args.qa_only)
     with open(args.output, "w", encoding="utf-8") as f:
         f.write("\n\n".join(examples))
 
