@@ -22,7 +22,7 @@ from document_loader import UPLOAD_TYPES, is_supported_document, read_document, 
 from model.config import Config
 from model.checkpoint import load_model_checkpoint
 from model.transformer import GPT
-from qa_knowledge import get_canonical_answer
+from qa_knowledge import delete_manual_qa, get_canonical_answer, load_manual_qa, upsert_manual_qa
 from collections import Counter
 import math
 
@@ -334,9 +334,42 @@ def is_domain_mismatch_response(query: str, response: str) -> bool:
     return False
 
 
+def detect_context_domain(context: List[Dict]) -> str:
+    scores = Counter()
+    for item in context[:5]:
+        category = item.get('category', '').lower()
+        source = item.get('source', '').lower()
+        text = item.get('text', '').lower()
+
+        if category:
+            scores[category] += 2
+        if 'xslt' in source or any(term in text for term in ['xsl:value-of', 'substring-before', 'format-number', 'oraext:', 'xp20:', 'normalize-space']):
+            scores['xslt'] += 4
+        if 'edi' in source or any(term in text for term in ['x12', 'edifact', 'isa*', 'gs*', 'st*850', 'edi 850']):
+            scores['edi'] += 4
+        if 'oracle' in source or any(term in text for term in ['oracle', 'oic', 'bpel', 'osb']):
+            scores['oracle'] += 3
+        if 'seeburger' in source or 'seeburger' in text:
+            scores['seeburger'] += 3
+
+    return scores.most_common(1)[0][0] if scores else ''
+
+
+def is_context_mismatch_response(response: str, context: List[Dict]) -> bool:
+    context_domain = detect_context_domain(context)
+    text = response.lower()
+
+    if context_domain == 'xslt':
+        return any(term in text for term in ['common edi x12', 'edi 850', 'edi 810', 'edi 856', 'edi 997', 'purchase order transaction'])
+    if context_domain == 'edi':
+        return any(term in text for term in ['xsl:value-of', 'substring-before', 'format-number', 'xpath'])
+
+    return False
+
+
 def extract_function_terms(query: str) -> List[str]:
     terms = re.findall(r'[A-Za-z_][\w:-]*\s*\(\)', query)
-    terms.extend(re.findall(r'\b(substring-before|substring-after|format-number|normalize-space|translate|string-length)\b', query, flags=re.IGNORECASE))
+    terms.extend(re.findall(r'\b(substring-before|substring-after|format-number|normalize-space|translate|string-length|string|number|boolean)\b', query, flags=re.IGNORECASE))
     cleaned = []
     for term in terms:
         normalized = term.lower().replace(' ', '')
@@ -347,31 +380,141 @@ def extract_function_terms(query: str) -> List[str]:
     return cleaned
 
 
-def build_rag_first_answer(query: str, context: List[Dict]) -> str:
-    function_terms = extract_function_terms(query)
-    if not function_terms:
+def extract_function_snippet(text: str, bare_term: str) -> str:
+    compact = ' '.join(text.split())
+    escaped = re.escape(bare_term)
+    start_match = (
+        re.search(escaped + r'\s*\(\)\s*-+', compact, re.IGNORECASE)
+        or re.search(escaped + r'\s*\(', compact, re.IGNORECASE)
+        or re.search(escaped, compact, re.IGNORECASE)
+    )
+    if not start_match:
         return ''
 
-    matches = []
+    start = start_match.start()
+    remainder = compact[start:]
+    next_function = re.search(
+        r'\s+[A-Za-z_][\w:-]*\s*\([^)]*\)\s*-{2,}',
+        remainder[start_match.end() - start:],
+        re.IGNORECASE
+    )
+    end = (start_match.end() + next_function.start()) if next_function else min(len(compact), start + 360)
+    snippet = compact[start:end].strip(' -')
+    return snippet[:420]
+
+
+def pretty_print_xml_snippet(snippet: str) -> str:
+    text = snippet.strip()
+    text = re.sub(r'>\s*<', '>\n<', text)
+    text = re.sub(r'\s+(output field/element mapping:)', r'\n\n\1', text, flags=re.IGNORECASE)
+    text = re.sub(r'(Code to [^:]+:)\s*', r'\1\n', text, flags=re.IGNORECASE)
+    return text
+
+
+def looks_like_code(snippet: str) -> bool:
+    lowered = snippet.lower()
+    return any(marker in lowered for marker in ['<xsl:', '</xsl:', '<xsl', 'select=', 'substring-before(', 'format-number(', 'oraext:', 'xp20:'])
+
+
+def format_rag_snippet(snippet: str) -> str:
+    if not looks_like_code(snippet):
+        return snippet
+    return f"```xml\n{pretty_print_xml_snippet(snippet)}\n```"
+
+
+def extract_keyword_snippet(query: str, context: List[Dict]) -> Tuple[str, str]:
+    keywords = [word for word in extract_keywords(query) if len(word) > 2]
+    if not keywords:
+        return '', ''
+
+    ordered_keyword_pattern = r'\b' + r'\b.{0,30}\b'.join(re.escape(keyword) for keyword in keywords) + r'\b'
+    best = (0, '', '')
     for item in context:
         text = ' '.join(item.get('text', '').split())
         lower_text = text.lower()
-        for term in function_terms:
-            bare_term = term[:-2] if term.endswith('()') else term
-            if term in lower_text or bare_term in lower_text:
-                pattern = re.compile(r'(.{0,180}' + re.escape(bare_term) + r'\s*\(?[^.]{0,260})', re.IGNORECASE)
-                found = pattern.findall(text)
-                snippet = found[0].strip() if found else format_snippet(text, length=360)
-                matches.append((term, snippet, item.get('source', 'source')))
-                break
+        phrase_match = re.search(ordered_keyword_pattern, lower_text, re.IGNORECASE)
+        score = sum(1 for keyword in keywords if keyword in lower_text)
+        if phrase_match:
+            score += 20
+        if score == 0:
+            continue
 
-    if not matches:
+        if phrase_match:
+            start = phrase_match.start()
+        else:
+            first_positions = [lower_text.find(keyword) for keyword in keywords if keyword in lower_text]
+            start = max(0, min(first_positions) - 80)
+        end = min(len(text), start + 460)
+        snippet = text[start:end].strip()
+
+        split_markers = [
+            re.search(r'\s+Code to\s+', snippet[60:], re.IGNORECASE),
+            re.search(r'\s+[A-Za-z_][\w:-]*\s*\([^)]*\)\s*-{2,}', snippet[80:], re.IGNORECASE),
+        ]
+        split_positions = []
+        for marker, offset in [(split_markers[0], 60), (split_markers[1], 80)]:
+            if marker:
+                split_positions.append(offset + marker.start())
+        if split_positions:
+            snippet = snippet[:min(split_positions)].strip()
+
+        if score > best[0]:
+            best = (score, snippet, item.get('source', 'source'))
+
+    min_score = 2 if len(keywords) <= 3 else 3
+    if best[0] >= min_score:
+        return best[1], best[2]
+    return '', ''
+
+
+def read_source_text(source: str) -> str:
+    normalized_source = source.replace('\\', os.sep).replace('/', os.sep)
+    candidates = [
+        os.path.join(DOCS_ROOT, normalized_source),
+        os.path.join(DOCS_ROOT, 'uploads', os.path.basename(normalized_source)),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return read_file_from_disk(path)
+    return ''
+
+
+def build_rag_first_answer(query: str, context: List[Dict]) -> str:
+    function_terms = extract_function_terms(query)
+    if function_terms:
+        matches = []
+        for item in context:
+            text = ' '.join(item.get('text', '').split())
+            lower_text = text.lower()
+            for term in function_terms:
+                bare_term = term[:-2] if term.endswith('()') else term
+                if term in lower_text or bare_term in lower_text:
+                    snippet = extract_function_snippet(text, bare_term) or format_snippet(text, length=260)
+                    matches.append((term, snippet, item.get('source', 'source')))
+                    break
+
+        if matches:
+            term, snippet, source = matches[0]
+            return '\n\n'.join([
+                f"From the retrieved document, `{term}` is used as follows:",
+                format_rag_snippet(snippet),
+                f"Source: {source}"
+            ])
+
+    snippet, source = extract_keyword_snippet(query, context)
+    if snippet and source:
+        full_text = read_source_text(source)
+        if full_text:
+            full_snippet, _ = extract_keyword_snippet(query, [{'source': source, 'category': 'source', 'text': full_text}])
+            if len(full_snippet) > len(snippet):
+                snippet = full_snippet
+
+    if not snippet:
         return ''
 
-    term, snippet, source = matches[0]
     answer_lines = [
-        f"From the retrieved document, `{term}` is used as follows:",
-        snippet,
+        "From the retrieved document:",
+        format_rag_snippet(snippet),
         f"Source: {source}"
     ]
     return '\n\n'.join(answer_lines)
@@ -801,7 +944,7 @@ def cache_key(query, context, model, mode):
         'context_ids': context_ids,
         'model': model,
         'mode': mode,
-        'version': 'v3'
+        'version': 'v5'
     }
     raw_key = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
@@ -914,11 +1057,22 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
     if canonical_answer:
         return canonical_answer
 
+    prechecked_context = None
+    if model_name == 'MapMindGPT-Custom' and context:
+        prechecked_context = truncate_context(context, max_tokens=1200)
+        rag_first_answer = build_rag_first_answer(query, prechecked_context)
+        if rag_first_answer:
+            if use_cache:
+                cache[key] = rag_first_answer
+                save_cache(cache)
+            return rag_first_answer
+
     if key in cache:
         cached_response = cache[key]
         if model_name == 'MapMindGPT-Custom' and (
             is_custom_unavailable_response(cached_response)
             or is_low_quality_custom_response(cached_response)
+            or is_context_mismatch_response(cached_response, context)
         ):
             del cache[key]
             save_cache(cache)
@@ -930,13 +1084,7 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
         if not context:
             return "I don't have relevant knowledge for that query."
 
-        context = truncate_context(context, max_tokens=1200)
-        rag_first_answer = build_rag_first_answer(query, context)
-        if rag_first_answer:
-            if use_cache:
-                cache[key] = rag_first_answer
-                save_cache(cache)
-            return rag_first_answer
+        context = prechecked_context or truncate_context(context, max_tokens=1200)
 
         context_text = '\n\n'.join(
             [f"[{c['source']}]\n{c['text']}" for c in context]
@@ -962,6 +1110,7 @@ Assistant:
             is_custom_unavailable_response(response)
             or is_low_quality_custom_response(response)
             or is_domain_mismatch_response(query, response)
+            or is_context_mismatch_response(response, context)
         ):
             response = build_custom_fallback_answer(query, context)
 
@@ -1179,6 +1328,32 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Restore failed: {e}")
+
+    with st.expander('Manual Knowledge', expanded=False):
+        manual_question = st.text_input('Question', key='manual_qa_question')
+        manual_answer = st.text_area('Answer', key='manual_qa_answer', height=120)
+        if st.button('Save Knowledge'):
+            if manual_question.strip() and manual_answer.strip():
+                upsert_manual_qa(manual_question, manual_answer)
+                write_audit_event('save_manual_qa', {'question': manual_question.strip()})
+                st.success('Knowledge saved')
+                st.rerun()
+            else:
+                st.warning('Enter both question and answer')
+
+        manual_entries = load_manual_qa()
+        st.caption(f'Saved Q&A: {len(manual_entries)}')
+        if manual_entries:
+            labels = [f"{idx + 1}. {item['question'][:70]}" for idx, item in enumerate(manual_entries)]
+            selected_manual = st.selectbox('Saved entries', labels)
+            selected_index = labels.index(selected_manual)
+            st.code(manual_entries[selected_index]['answer'])
+            if st.button('Delete Knowledge'):
+                removed_question = manual_entries[selected_index]['question']
+                delete_manual_qa(selected_index)
+                write_audit_event('delete_manual_qa', {'question': removed_question})
+                st.success('Knowledge deleted')
+                st.rerun()
     
     st.header('Retrieval Settings')
     use_reranker = st.checkbox('Use reranker', value=True)
@@ -1395,7 +1570,7 @@ for idx, msg in enumerate(st.session_state.messages):
         st.markdown(msg['content'])
         
         if msg['role'] == 'assistant' and idx == len(st.session_state.messages) - 1:
-            col1, col2 = st.columns([1, 1])
+            col1, col2, col3 = st.columns([1, 1, 2])
             with col1:
                 if st.button('👍', key=f'up_{idx}'):
                     save_feedback(st.session_state.messages[idx-1]['content'], msg['content'], 'positive')
@@ -1404,6 +1579,11 @@ for idx, msg in enumerate(st.session_state.messages):
                 if st.button('👎', key=f'down_{idx}'):
                     save_feedback(st.session_state.messages[idx-1]['content'], msg['content'], 'negative')
                     st.success('Feedback saved')
+            with col3:
+                if idx > 0 and st.button('Save as Knowledge', key=f'knowledge_{idx}'):
+                    upsert_manual_qa(st.session_state.messages[idx-1]['content'], msg['content'])
+                    write_audit_event('save_manual_qa_from_chat', {'question': st.session_state.messages[idx-1]['content']})
+                    st.success('Saved to manual knowledge')
 
 query = st.chat_input('Ask MapMindGPT...')
 if query:
@@ -1436,7 +1616,7 @@ if query:
             else:
                 st.info('No relevant sources found')
 
-        col1, col2 = st.columns([1, 1])
+        col1, col2, col3 = st.columns([1, 1, 2])
 
         with col1:
             if st.button('👍', key=f'feedback_up_{len(st.session_state.messages)}'):
@@ -1447,5 +1627,11 @@ if query:
             if st.button('👎', key=f'feedback_down_{len(st.session_state.messages)}'):
                 save_feedback(query, answer, 'negative')
                 st.success('Thanks for feedback')
+
+        with col3:
+            if st.button('Save as Knowledge', key=f'knowledge_current_{len(st.session_state.messages)}'):
+                upsert_manual_qa(query, answer)
+                write_audit_event('save_manual_qa_from_chat', {'question': query})
+                st.success('Saved to manual knowledge')
         
         st.session_state.messages.append({'role': 'assistant', 'content': answer})
