@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "question": "what is format-number()?",
+    "answer": "In XSLT/XPath, format-number(value, pattern) formats a numeric value using a pattern. Example: format-number($amount, '#.00') formats the value with two decimal places."
+  },
+  {
+    "question": "Code to take first true occurrence value?",
+    "answer": "From the retrieved document:\n\n```xml\nCode to take first true occurrence value:\n<xsl:variable name=\"VAR_FCR_NUMBER\">\n<xsl:for-each select=\"/ns0:Message-DISNEY_POINV/ns0:Record-HLDTL\">\n<xsl:if test=\"normalize-space (ns0:Field-FCR_NUMBER ) != ''\">\n<xsl:value-of select='concat(normalize-space (ns0:Field-FCR_NUMBER),\"//\")'/>\n</xsl:if>\n</xsl:for-each>\n</xsl:variable>\n\noutput field/element mapping: <xsl:value-of select='substring-before($VAR_FCR_NUMBER,\"//\")'/>\n```\n\nSource: uploads\\XSLT_Basics.txt.txt"
+  }
+]

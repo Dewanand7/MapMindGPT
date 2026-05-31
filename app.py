@@ -44,12 +44,37 @@ logging.basicConfig(level=logging.INFO)
 
 STOPWORDS = {'what','is','the','a','an','how','explain','tell','me','about','can','you','please','to','of','in','on','at','for','with','from','by','and','or'}
 DOMAIN_HINTS = {
-    'edi': ['edi','850','810','856','997','as2','x12','edifact'],
-    'oracle': ['soa','oic','osb','bpel','mediator','oracle','dehydration'],
-    'xslt': ['xslt','xpath','xml','xsd','namespace'],
+    'edi': ['edi','850','810','856','997','as2','x12','edifact','purchase order','invoice transaction','advance ship notice','functional acknowledgement'],
+    'oracle': ['soa','oic','osb','bpel','mediator','oracle','dehydration','oracle integration cloud'],
+    'xslt': ['xslt','xpath','xml','xsd','namespace','xsl:value-of','xsl:variable','xsl:for-each','substring-before','substring-after','format-number','normalize-space','translate','string-length','string()','number()','boolean()','oraext','xp20','left-trim','right-trim','code to take','occurrence'],
     'seeburger': ['seeburger','bis'],
     'ai': ['ai','transformer','llm','machine','learning']
 }
+DOMAIN_PROFILES = {
+    'edi': 'EDI X12 EDIFACT AS2 purchase order invoice shipment notice acknowledgement trading partner transaction 850 810 856 997',
+    'oracle': 'Oracle Integration Cloud SOA Suite OSB BPEL mediator adapter dehydration fault policy integration middleware',
+    'xslt': 'XSLT XPath XML XSD namespace mapping xsl value-of variable for-each substring-before format-number normalize-space translate oraext xp20 string number function',
+    'seeburger': 'SEEBURGER BIS partner setup routing B2B integration communication channel message processing',
+    'ai': 'machine learning AI transformer LLM neural network training model checkpoint embedding reranker'
+}
+INTENT_HINTS = {
+    'code_example': ['code','example','syntax','sample','xsl:value-of','<xsl','select=','substring-before','substring-after','format-number','normalize-space','translate','string-length','string()','number()','boolean()','oraext','xp20','occurrence'],
+    'definition': ['what is','define','meaning','explain','what are'],
+    'troubleshooting': ['error','exception','failed','fail','warning','issue','fix','not working','traceback'],
+    'document_lookup': ['document','source','upload','file','retrieved','from docs','knowledge base'],
+    'training': ['train','training','checkpoint','loss','eval','epoch','steps','model'],
+    'general_chat': ['your name','who are you','hello','hi']
+}
+INTENT_PROFILES = {
+    'code_example': 'User wants code syntax examples snippets mappings XSLT XML expressions function usage and copyable code blocks',
+    'definition': 'User asks what something is and expects a short factual definition or explanation',
+    'troubleshooting': 'User has an error warning stack trace broken behavior or wants a fix',
+    'document_lookup': 'User wants answer from uploaded documents retrieved context sources or knowledge base',
+    'training': 'User asks about model training evaluation checkpoints loss steps data and machine learning improvement',
+    'general_chat': 'User is chatting casually asking identity greeting or conversational question'
+}
+ML_DOMAIN_THRESHOLD = 0.34
+ML_INTENT_THRESHOLD = 0.33
 AVAILABLE_MODELS = ['MapMindGPT-Custom','qwen2.5:7b-instruct','llama3:8b','mistral:7b','deepseek-coder:6.7b','codellama:7b']
 AVAILABLE_MODES = ['General Chat','Code Assistant','EDI Expert','Oracle Expert','XSLT/XPath Expert','SEEBURGER Expert']
 
@@ -231,6 +256,106 @@ def load_reranker():
     except Exception as e:
         logging.warning(f'Failed to load reranker: {e}')
         return None
+
+
+@st.cache_resource
+def load_routing_profiles():
+    embed_model = load_embed_model()
+    domain_names = list(DOMAIN_PROFILES.keys())
+    intent_names = list(INTENT_PROFILES.keys())
+    domain_vectors = embed_model.encode(
+        [DOMAIN_PROFILES[name] for name in domain_names],
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    )
+    intent_vectors = embed_model.encode(
+        [INTENT_PROFILES[name] for name in intent_names],
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    )
+    return domain_names, domain_vectors, intent_names, intent_vectors
+
+
+def match_hint(query: str, hints: Dict[str, List[str]]) -> Tuple[str, str]:
+    q = query.lower()
+    for label, terms in hints.items():
+        for term in terms:
+            if term in q:
+                return label, term
+    return '', ''
+
+
+def semantic_profile_match(query: str, names: List[str], vectors: np.ndarray) -> Tuple[str, float]:
+    try:
+        embed_model = load_embed_model()
+        q_vector = embed_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+        scores = np.matmul(vectors, q_vector)
+        best_idx = int(np.argmax(scores))
+        return names[best_idx], float(scores[best_idx])
+    except Exception as e:
+        logging.warning('ML route classification failed: %s', e)
+        return '', 0.0
+
+
+@st.cache_data(show_spinner=False)
+def classify_query_route(query: str) -> Dict[str, Any]:
+    clean_query = query.strip()
+    if not clean_query:
+        return {
+            'domain': None,
+            'domain_source': 'none',
+            'domain_score': 0.0,
+            'intent': 'general_chat',
+            'intent_source': 'default',
+            'intent_score': 0.0
+        }
+
+    domain, domain_term = match_hint(clean_query, DOMAIN_HINTS)
+    intent, intent_term = match_hint(clean_query, INTENT_HINTS)
+
+    route = {
+        'domain': domain or None,
+        'domain_source': f'rule:{domain_term}' if domain else 'none',
+        'domain_score': 1.0 if domain else 0.0,
+        'intent': intent or None,
+        'intent_source': f'rule:{intent_term}' if intent else 'none',
+        'intent_score': 1.0 if intent else 0.0
+    }
+
+    try:
+        domain_names, domain_vectors, intent_names, intent_vectors = load_routing_profiles()
+    except Exception as e:
+        logging.warning('Routing profiles unavailable: %s', e)
+        route['intent'] = route['intent'] or 'general_chat'
+        route['intent_source'] = route['intent_source'] if route['intent_source'] != 'none' else 'default'
+        return route
+
+    if not route['domain']:
+        ml_domain, ml_domain_score = semantic_profile_match(clean_query, domain_names, domain_vectors)
+        if ml_domain_score >= ML_DOMAIN_THRESHOLD:
+            route['domain'] = ml_domain
+            route['domain_source'] = 'ml'
+            route['domain_score'] = ml_domain_score
+        else:
+            route['domain_score'] = ml_domain_score
+
+    if not route['intent']:
+        ml_intent, ml_intent_score = semantic_profile_match(clean_query, intent_names, intent_vectors)
+        if ml_intent_score >= ML_INTENT_THRESHOLD:
+            route['intent'] = ml_intent
+            route['intent_source'] = 'ml'
+            route['intent_score'] = ml_intent_score
+        else:
+            route['intent'] = 'definition' if clean_query.lower().startswith(('what is', 'what are')) else 'general_chat'
+            route['intent_source'] = 'fallback'
+            route['intent_score'] = ml_intent_score
+
+    if route['intent'] == 'code_example' and not route['domain']:
+        route['domain'] = 'xslt'
+        route['domain_source'] = 'intent-default'
+        route['domain_score'] = max(route['domain_score'], 0.5)
+
+    return route
 
 
 @st.cache_resource
@@ -748,11 +873,47 @@ def extract_keywords(query):
 
 
 def detect_domain(query):
-    q = query.lower()
-    for domain, terms in DOMAIN_HINTS.items():
-        if any(term in q for term in terms):
-            return domain
-    return None
+    return classify_query_route(query).get('domain')
+
+
+def detect_intent(query):
+    return classify_query_route(query).get('intent') or 'general_chat'
+
+
+def intent_boost(item: Dict, intent: str, query: str = '') -> float:
+    if not intent:
+        return 0.0
+
+    text = item.get('text', '').lower()
+    source = item.get('source', '').lower()
+    category = item.get('category', '').lower()
+    query_terms = set(extract_keywords(query))
+    boost = 0.0
+
+    if intent == 'code_example':
+        code_markers = ['<xsl:', '</xsl:', 'xsl:value-of', 'select=', 'substring-before', 'format-number', 'oraext:', 'xp20:', 'code to']
+        if any(marker in text for marker in code_markers):
+            boost += 1.6
+        if category == 'xslt' or 'xslt' in source:
+            boost += 0.7
+        if query_terms and query_terms.intersection(set(extract_keywords(text))):
+            boost += 0.4
+    elif intent == 'definition':
+        if re.search(r'\b(is|are|means|used to|used for)\b', text):
+            boost += 0.5
+        if query_terms and query_terms.intersection(set(extract_keywords(text))):
+            boost += 0.3
+    elif intent == 'troubleshooting':
+        if any(marker in text for marker in ['error', 'exception', 'failed', 'warning', 'fix', 'not working', 'traceback']):
+            boost += 1.0
+    elif intent == 'document_lookup':
+        if is_uploaded_source(item.get('source', '')):
+            boost += 0.5
+    elif intent == 'training':
+        if any(marker in text for marker in ['train', 'training', 'checkpoint', 'loss', 'eval', 'model']):
+            boost += 0.8
+
+    return boost
 
 
 def domain_boost(item: Dict, domain: str) -> float:
@@ -816,7 +977,9 @@ def retrieve_semantic(query: str, top_k: int, scope: str) -> List[Tuple[float, D
     embed_model, index, chunks = load_resources()
     if not chunks:
         return []
-    domain = detect_domain(query)
+    route = classify_query_route(query)
+    domain = route.get('domain')
+    intent = route.get('intent')
     q_emb = embed_model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
     k = min(200, len(chunks))
     distances, ids = index.search(q_emb.astype(np.float32), k)
@@ -830,7 +993,7 @@ def retrieve_semantic(query: str, top_k: int, scope: str) -> List[Tuple[float, D
             continue
         if scope == 'Built-in docs' and is_uploaded_source(item['source']):
             continue
-        score = float(dist) + domain_boost(item, domain)
+        score = float(dist) + domain_boost(item, domain) + intent_boost(item, intent, query)
         results.append((score, item))
     results.sort(key=lambda x: x[0], reverse=True)
     return results[:top_k * 4]
@@ -840,7 +1003,9 @@ def retrieve_keyword(query: str, top_k: int, scope: str) -> List[Tuple[float, Di
     _, _, chunks = load_resources()
     if not chunks:
         return []
-    domain = detect_domain(query)
+    route = classify_query_route(query)
+    domain = route.get('domain')
+    intent = route.get('intent')
     
     filtered = chunks
     if scope == 'Uploaded only':
@@ -852,7 +1017,10 @@ def retrieve_keyword(query: str, top_k: int, scope: str) -> List[Tuple[float, Di
         return []
     
     bm25_scores = compute_bm25_scores(query, filtered)
-    results = [(score + domain_boost(chunk, domain), chunk) for score, chunk in zip(bm25_scores, filtered)]
+    results = [
+        (score + domain_boost(chunk, domain) + intent_boost(chunk, intent, query), chunk)
+        for score, chunk in zip(bm25_scores, filtered)
+    ]
     results.sort(key=lambda x: x[0], reverse=True)
     return results[:top_k * 4]
 
@@ -876,17 +1044,27 @@ def reciprocal_rank_fusion(semantic: List[Tuple[float, Dict]], keyword: List[Tup
 def rerank_results(query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
     if len(candidates) <= top_k:
         return candidates
-    domain = detect_domain(query)
+    route = classify_query_route(query)
+    domain = route.get('domain')
+    intent = route.get('intent')
     
     reranker = load_reranker()
     if reranker is None:
-        ranked = sorted(candidates, key=lambda item: domain_boost(item, domain), reverse=True)
+        ranked = sorted(
+            candidates,
+            key=lambda item: domain_boost(item, domain) + intent_boost(item, intent, query),
+            reverse=True
+        )
         return ranked[:top_k]
     
     pairs = [[query, c['text']] for c in candidates]
     scores = reranker.predict(pairs)
     
-    ranked = sorted(zip(scores, candidates), key=lambda x: float(x[0]) + domain_boost(x[1], domain), reverse=True)
+    ranked = sorted(
+        zip(scores, candidates),
+        key=lambda x: float(x[0]) + domain_boost(x[1], domain) + intent_boost(x[1], intent, query),
+        reverse=True
+    )
     return [item for _, item in ranked[:top_k]]
 
 
@@ -944,7 +1122,7 @@ def cache_key(query, context, model, mode):
         'context_ids': context_ids,
         'model': model,
         'mode': mode,
-        'version': 'v5'
+        'version': 'v6'
     }
     raw_key = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
@@ -1057,8 +1235,10 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
     if canonical_answer:
         return canonical_answer
 
+    route = classify_query_route(query)
     prechecked_context = None
-    if model_name == 'MapMindGPT-Custom' and context:
+    rag_first_intents = {'code_example', 'document_lookup'}
+    if context and (model_name == 'MapMindGPT-Custom' or route.get('intent') in rag_first_intents):
         prechecked_context = truncate_context(context, max_tokens=1200)
         rag_first_answer = build_rag_first_answer(query, prechecked_context)
         if rag_first_answer:
@@ -1091,9 +1271,11 @@ def ask_llm(query: str, context, history, model_name: str, mode: str, use_cache:
         )
 
         system_prompt = get_system_prompt(mode)
+        route_note = f"Detected domain: {route.get('domain') or 'general'}; detected intent: {route.get('intent') or 'general_chat'}."
 
         prompt = f"""
 {system_prompt}
+{route_note}
 
 Use only the context below. If the context is not enough, say what is missing.
 Keep the answer concise and practical.
@@ -1375,6 +1557,7 @@ with st.sidebar:
         test_top_k = st.slider('Test sources', 1, 10, 5, key='retrieval_test_top_k')
         if st.button('Test Retrieval'):
             if test_query.strip():
+                test_route = classify_query_route(test_query)
                 test_results = retrieve(
                     test_query,
                     top_k=test_top_k,
@@ -1383,7 +1566,7 @@ with st.sidebar:
                 )
                 st.session_state.retrieval_test_results = {
                     'query': test_query,
-                    'domain': detect_domain(test_query) or 'none',
+                    'route': test_route,
                     'results': test_results
                 }
             else:
@@ -1391,7 +1574,12 @@ with st.sidebar:
 
         if 'retrieval_test_results' in st.session_state:
             result_set = st.session_state.retrieval_test_results
-            st.caption(f"Detected domain: {result_set['domain']}")
+            route = result_set.get('route', {})
+            st.caption(
+                "Route: "
+                f"domain `{route.get('domain') or 'none'}` ({route.get('domain_source', 'none')}, {route.get('domain_score', 0):.2f}) | "
+                f"intent `{route.get('intent') or 'none'}` ({route.get('intent_source', 'none')}, {route.get('intent_score', 0):.2f})"
+            )
             for idx, item in enumerate(result_set['results'], start=1):
                 with st.container():
                     st.markdown(f"**{idx}. {item.get('source', 'unknown')}** · `{item.get('category', 'unknown')}`")
